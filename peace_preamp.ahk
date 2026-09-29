@@ -49,7 +49,7 @@ profiles := Map()
 
 profiles["casque"] := {
     label     : "Casque",
-    default   : -10.0,
+    default   : -15.0,
     cur       :   0.0,
     min       : -30.0,
     max       : -10.0,
