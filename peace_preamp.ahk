@@ -533,3 +533,49 @@ $^!F2:: {
         ShowOSD(p.label, Fmt(p.cur) " dB", 2500)
     }
 }
+
+; ============================================================
+;  ÉCRAN NOIR (anti burn-in OLED pendant une absence courte)
+; ============================================================
+; Ctrl+Alt+B → couvre tous les écrans de noir opaque, sans éteindre
+; le signal vidéo (donc pas de cycle de nettoyage de pixels du moniteur).
+; Se ferme sur Échap ou clic gauche uniquement (pas de boucle "toutes
+; touches" : ça avait enregistré des hotkeys sur Ctrl/Alt/Shift/Win seuls
+; et bloqué tout le clavier le 2026-09-19).
+
+blackScreenGuis := []
+
+IsBlackScreenActive() {
+    global blackScreenGuis
+    return blackScreenGuis.Length > 0
+}
+
+ShowBlackScreen() {
+    global blackScreenGuis
+    Loop MonitorGetCount() {
+        MonitorGet(A_Index, &L, &T, &R, &B)
+        g := Gui("-Caption +AlwaysOnTop +ToolWindow")
+        g.BackColor := "000000"
+        g.Show(Format("x{1} y{2} w{3} h{4} NoActivate", L, T, R - L, B - T))
+        blackScreenGuis.Push(g)
+    }
+}
+
+HideBlackScreen() {
+    global blackScreenGuis
+    for g in blackScreenGuis
+        g.Destroy()
+    blackScreenGuis := []
+}
+
+$^!b:: {
+    if IsBlackScreenActive()
+        HideBlackScreen()
+    else
+        ShowBlackScreen()
+}
+
+#HotIf IsBlackScreenActive()
+Escape::HideBlackScreen()
+LButton::HideBlackScreen()
+#HotIf
