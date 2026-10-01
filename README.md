@@ -40,6 +40,7 @@ Deux versions coexistent :
 
 - **Raccourcis via `RegisterHotKey`** (API Windows standard, comme Discord ou OBS) au lieu d'un hook clavier bas niveau.
 - **Le switch de profil écrit directement `peace.txt`** (lu par Equalizer APO via `Include: peace.txt` dans `config.txt`) au lieu d'envoyer `Ctrl+Alt+F1/F2` à Peace. Le contenu vient de modèles capturés depuis Peace dans `templates/` : seules les lignes `Device:` (GUID actuel) et `Preamp:` sont réécrites.
+- **Peace reste cohérent avec le profil appliqué** : à son ouverture, Peace recharge `Last Configuration.peace` (et non le profil sélectionné) puis réécrit `peace.txt` avec. Le switch recopie donc aussi le profil dans `Last Configuration.peace` (après correction de son GUID) et met à jour `Selected Configuration=` dans `peace.ini`, sinon ouvrir Peace annulerait le switch. Limite : changer de profil *pendant* que Peace est ouvert ne met pas son interface à jour, et il réenregistrera son ancien état en se fermant.
 - **Les modèles se mettent à jour seuls** : si l'EQ est modifié dans Peace, la sync périodique recopie le nouveau `peace.txt` dans le modèle du profil concerné.
 - **Peace est fermé au démarrage** : il réserve lui aussi `Ctrl+Alt+F1/F2`, ce qui empêcherait le script de les obtenir. Il n'est pas nécessaire au son (c'est Equalizer APO qui applique `peace.txt`). Désactivable via `$ClosePeace` en haut du script.
 - **DPI par écran** : l'OSD et l'écran noir s'affichent correctement sur des écrans à mises à l'échelle différentes.

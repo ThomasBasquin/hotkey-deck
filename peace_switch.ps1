@@ -216,11 +216,28 @@ function Write-PeaceLines([string[]]$lines) {
     [IO.File]::WriteAllText($S.PeaceFile, (($lines -join "`r`n") + "`r`n"), $Utf8NoBom)
 }
 
+# Les fichiers de Peace sont en ANSI avec quelques octets invalides : Latin-1
+# relit/réécrit chaque octet à l'identique.
+$Latin1 = [Text.Encoding]::GetEncoding(28591)
+
+# À son ouverture, Peace ne recharge pas le profil sélectionné mais
+# "Last Configuration.peace" (l'état sauvé à sa dernière fermeture), puis
+# réécrit peace.txt avec. On y recopie donc le profil appliqué, après avoir
+# corrigé son GUID (DAC USB qui change d'identité) comme le faisait l'AHK.
+function Sync-PeaceProfileFiles($p, [string]$guid) {
+    $text = [IO.File]::ReadAllText($p.PeaceProfile, $Latin1)
+    $fixed = [regex]::Replace($text, '(?m)^Device GUID=\{[0-9a-fA-F-]+\}', "Device GUID=$guid")
+    if ($fixed -ne $text) {
+        [IO.File]::WriteAllText($p.PeaceProfile, $fixed, $Latin1)
+        Log "GUID corrigé dans $($p.PeaceProfile) (dérive détectée)"
+    }
+    Copy-Item $p.PeaceProfile (Join-Path $S.PeaceDir 'Last Configuration.peace') -Force
+}
+
 function Set-PeaceSelectedConfiguration([string]$name) {
     $ini = Join-Path $S.PeaceDir 'peace.ini'
     if (-not (Test-Path $ini)) { return }
-    # peace.ini est en ANSI : on garde le même encodage pour ne rien abîmer
-    $enc = [Text.Encoding]::Default
+    $enc = $Latin1
     $lines = [IO.File]::ReadAllLines($ini, $enc)
     $changed = $false
     for ($i = 0; $i -lt $lines.Count; $i++) {
@@ -349,9 +366,10 @@ function Switch-Profile([string]$key) {
     }
     Write-PeaceLines $lines
 
-    # Peace ne lit pas peace.txt pour savoir quel profil afficher, mais
-    # "Selected Configuration=" dans peace.ini — et réécrit peace.txt avec ce
-    # profil à son ouverture. Sans ça, ouvrir Peace annulerait le switch.
+    # Peace ne lit pas peace.txt : il recharge "Last Configuration.peace" et
+    # affiche "Selected Configuration=" de peace.ini, puis réécrit peace.txt
+    # à son ouverture. Sans ça, ouvrir Peace annulerait le switch.
+    Sync-PeaceProfileFiles $p $guid
     Set-PeaceSelectedConfiguration ([IO.Path]::GetFileNameWithoutExtension($p.PeaceProfile))
 
     $S.Active = $key
