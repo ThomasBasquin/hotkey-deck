@@ -216,6 +216,25 @@ function Write-PeaceLines([string[]]$lines) {
     [IO.File]::WriteAllText($S.PeaceFile, (($lines -join "`r`n") + "`r`n"), $Utf8NoBom)
 }
 
+function Set-PeaceSelectedConfiguration([string]$name) {
+    $ini = Join-Path $S.PeaceDir 'peace.ini'
+    if (-not (Test-Path $ini)) { return }
+    # peace.ini est en ANSI : on garde le même encodage pour ne rien abîmer
+    $enc = [Text.Encoding]::Default
+    $lines = [IO.File]::ReadAllLines($ini, $enc)
+    $changed = $false
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($lines[$i] -match '^Selected Configuration=' -and $lines[$i] -ne "Selected Configuration=$name") {
+            $lines[$i] = "Selected Configuration=$name"
+            $changed = $true
+        }
+    }
+    if ($changed) {
+        [IO.File]::WriteAllLines($ini, $lines, $enc)
+        Log "peace.ini : profil sélectionné -> $name"
+    }
+}
+
 function Read-Preamp {
     foreach ($l in Read-PeaceLines) {
         if ($l -match '^Preamp:\s*([-\d.]+)') { return [double]::Parse($Matches[1], $Inv) }
@@ -329,6 +348,11 @@ function Switch-Profile([string]$key) {
         else   { $l }
     }
     Write-PeaceLines $lines
+
+    # Peace ne lit pas peace.txt pour savoir quel profil afficher, mais
+    # "Selected Configuration=" dans peace.ini — et réécrit peace.txt avec ce
+    # profil à son ouverture. Sans ça, ouvrir Peace annulerait le switch.
+    Set-PeaceSelectedConfiguration ([IO.Path]::GetFileNameWithoutExtension($p.PeaceProfile))
 
     $S.Active = $key
     $S.Muted  = $false
