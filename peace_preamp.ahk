@@ -52,7 +52,7 @@ profiles["casque"] := {
     default   : -15.0,
     cur       :   0.0,
     min       : -30.0,
-    max       : -10.0,
+    max       :  -8.0,   ; = -(boost max de l'EQ casque : +8 dB)
     step      :   0.5,
     warnZone  :   1.5
 }
@@ -62,7 +62,7 @@ profiles["enceintes"] := {
     default   : -10.0,
     cur       :   0.0,
     min       : -30.0,
-    max       :  -3.0,
+    max       :  -5.0,   ; = -(boost max de l'EQ enceintes : +5 dB)
     step      :   0.5,
     warnZone  :   1.5
 }

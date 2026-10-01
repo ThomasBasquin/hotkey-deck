@@ -12,7 +12,7 @@ Deux versions coexistent :
 ## Fonctionnalités
 
 - Réglage du preamp par pas de 0.5 dB avec affichage OSD
-- Deux profils : **Casque** (plafond -10 dB) et **Enceintes** (plafond -3 dB)
+- Deux profils : **Casque** (plafond -8 dB) et **Enceintes** (plafond -5 dB). Chaque plafond vaut l'opposé du plus gros boost de l'EQ du profil (+8 / +5 dB), pour que le signal ne sature jamais
 - Mute toggle
 - Avertissement visuel à l'approche du plafond
 - Synchronisation périodique avec `peace.txt` (détecte les changements externes)
