@@ -1,0 +1,6 @@
+Device: FiiO K11 R2R Haut-parleurs {30e31436-cef2-4fe7-ba1a-bff5c38676d6}
+Channel: all
+Preamp: -15 dB
+Filter 1: ON LSC Fc 105 Hz Gain 8 dB Q 0.71
+Filter 9: ON PK Fc 1800 Hz Gain 1.4 dB Q 1
+Filter 10: ON PK Fc 2950 Hz Gain -0.3 dB Q 2.5

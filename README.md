@@ -1,6 +1,13 @@
 # Peace Preamp AHK
 
-Script AutoHotkey v2 pour contrôler le preamp de [Peace](https://sourceforge.net/projects/peace-equalizer-apo-extension/) (interface graphique d'Equalizer APO) avec un OSD à l'écran.
+Contrôle du preamp de [Peace](https://sourceforge.net/projects/peace-equalizer-apo-extension/) (interface graphique d'Equalizer APO) avec un OSD à l'écran, et bascule casque/enceintes.
+
+Deux versions coexistent :
+
+| Fichier | Statut | Notes |
+|---------|--------|-------|
+| `peace_switch.ps1` | **Version principale** (PowerShell) | Aucun hook clavier/souris ni injection de touches : n'est pas détecté comme logiciel de triche par les anti-cheats (ex. Easy Anti-Cheat dans The Finals) |
+| `peace_preamp.ahk` | Version d'origine (AutoHotkey v2) | Conservée comme référence / repli ; son hook clavier bas niveau et le binaire AutoHotkey sont détectés par certains anti-cheats |
 
 ## Fonctionnalités
 
@@ -9,15 +16,10 @@ Script AutoHotkey v2 pour contrôler le preamp de [Peace](https://sourceforge.ne
 - Mute toggle
 - Avertissement visuel à l'approche du plafond
 - Synchronisation périodique avec `peace.txt` (détecte les changements externes)
-- Réinstallation automatique du hook clavier (contourne l'éjection par certains jeux)
 - OSD affichant le profil actif dès le lancement du script
-- Nouvelle tentative automatique (~1.2 s) si le périphérique du profil visé n'est pas encore détecté comme actif (DAC USB qui se réveille), et confirmation réelle (pas supposée) que Peace a bien chargé le profil avant de mettre à jour l'OSD
-
-## Prérequis
-
-- [AutoHotkey v2](https://www.autohotkey.com/)
-- [Equalizer APO](https://sourceforge.net/projects/equalizerapo/)
-- [Peace Equalizer](https://sourceforge.net/projects/peace-equalizer-apo-extension/)
+- Bascule de la sortie audio Windows par défaut avec le profil
+- Correction automatique du GUID du périphérique (DAC USB qui change d'identité), avec nouvelle tentative (~1.2 s) si le périphérique n'est pas encore actif
+- Écran noir anti burn-in OLED sur tous les écrans (Échap ou clic pour fermer)
 
 ## Raccourcis
 
@@ -28,22 +30,62 @@ Script AutoHotkey v2 pour contrôler le preamp de [Peace](https://sourceforge.ne
 | `F15` | Toggle mute |
 | `Ctrl+Alt+F1` | Profil Enceintes |
 | `Ctrl+Alt+F2` | Profil Casque |
+| `Ctrl+Alt+B` | Écran noir |
 
 > Les touches F13–F15 sont typiquement assignées via un clavier programmable ou un logiciel de remapping.
 
-## Installation
+## Version PowerShell (`peace_switch.ps1`)
 
-1. Installer les prérequis ci-dessus
-2. Le script a besoin des droits administrateur (il écrit dans `Program Files\EqualizerAPO\config\`). Pour éviter une invite UAC à chaque démarrage de Windows, il est lancé via une tâche planifiée **"Peace Preamp Controller"** (déclencheur : ouverture de session, niveau d'exécution : le plus élevé) plutôt que via un raccourci dans le dossier Démarrage — une tâche planifiée en élévation maximale ne redemande pas de confirmation UAC.
-3. Lancé manuellement (double-clic), le script s'auto-élève via `RunAs` et redemande donc l'UAC — c'est normal, ça ne concerne que ce cas d'usage.
+### Différences de fonctionnement avec la version AHK
 
-## Diagnostic
+- **Raccourcis via `RegisterHotKey`** (API Windows standard, comme Discord ou OBS) au lieu d'un hook clavier bas niveau.
+- **Le switch de profil écrit directement `peace.txt`** (lu par Equalizer APO via `Include: peace.txt` dans `config.txt`) au lieu d'envoyer `Ctrl+Alt+F1/F2` à Peace. Le contenu vient de modèles capturés depuis Peace dans `templates/` : seules les lignes `Device:` (GUID actuel) et `Preamp:` sont réécrites.
+- **Les modèles se mettent à jour seuls** : si l'EQ est modifié dans Peace, la sync périodique recopie le nouveau `peace.txt` dans le modèle du profil concerné.
+- **Peace est fermé au démarrage** : il réserve lui aussi `Ctrl+Alt+F1/F2`, ce qui empêcherait le script de les obtenir. Il n'est pas nécessaire au son (c'est Equalizer APO qui applique `peace.txt`). Désactivable via `$ClosePeace` en haut du script.
+- **DPI par écran** : l'OSD et l'écran noir s'affichent correctement sur des écrans à mises à l'échelle différentes.
 
-Chaque tentative de switch de profil (recherche du périphérique, résultat, confirmation) est journalisée dans `%TEMP%\peace_preamp.log` (rotation automatique au-delà de 256 Ko). Utile pour comprendre après coup un switch casque/enceintes qui semble avoir échoué.
+### Installation
+
+1. Installer [Equalizer APO](https://sourceforge.net/projects/equalizerapo/) et [Peace](https://sourceforge.net/projects/peace-equalizer-apo-extension/), créer les profils `Casque.peace` et `Enceintes.peace`.
+2. Capturer les modèles : appliquer chaque profil dans Peace et copier `C:\Program Files\EqualizerAPO\config\peace.txt` vers `templates\casque.txt` / `templates\enceintes.txt`.
+3. Lancement au démarrage via la tâche planifiée **"Peace Preamp Controller"** (déclencheur : ouverture de session, niveau d'exécution : le plus élevé — nécessaire pour pouvoir fermer Peace s'il tourne en admin), action :
+
+   ```
+   conhost.exe --headless powershell.exe -NoProfile -Sta -ExecutionPolicy Bypass -File "C:\Users\Thomas\Documents\AutoHotkey\peace_switch.ps1"
+   ```
+
+   `conhost --headless` évite le flash d'une fenêtre console. Une seule instance peut tourner à la fois (mutex).
+
+Le fichier `.ps1` doit rester encodé en **UTF-8 avec BOM** (Windows PowerShell 5.1 lit sinon les accents et symboles de l'OSD en ANSI).
+
+### Diagnostic
+
+Journal dans `%TEMP%\peace_switch.log` (rotation au-delà de 256 Ko) : démarrage, raccourcis non réservables, switchs de profil, mises à jour des modèles, erreurs.
+
+## Version AutoHotkey (`peace_preamp.ahk`)
+
+### Prérequis
+
+- [AutoHotkey v2](https://www.autohotkey.com/)
+- Equalizer APO et Peace
+
+### Installation
+
+Le script a besoin des droits administrateur (il écrit dans `Program Files\EqualizerAPO\config\`) et s'auto-élève via `RunAs` s'il est lancé manuellement. Pour revenir à cette version au démarrage, remettre comme action de la tâche planifiée **"Peace Preamp Controller"** :
+
+```
+"C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe" "C:\Users\Thomas\Documents\AutoHotkey\peace_preamp.ahk"
+```
+
+Contrairement à la version PowerShell, elle passe par les raccourcis de Peace (`Ctrl+Alt+F1/F2`) pour changer de profil, et réinstalle périodiquement son hook clavier (que certains jeux éjectent).
+
+### Diagnostic
+
+Journal dans `%TEMP%\peace_preamp.log` (rotation au-delà de 256 Ko).
 
 ## Configuration
 
-Les profils sont définis en haut du script dans la `Map` `profiles`. Chaque profil contient :
+Les profils sont définis en haut de chaque script (`$S.Profiles` en PowerShell, `Map` `profiles` en AHK). Chaque profil contient :
 
 | Paramètre | Description |
 |-----------|-------------|
