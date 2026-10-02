@@ -441,13 +441,13 @@ $osd.ShowInTaskbar   = $false
 $osd.TopMost         = $true
 $osd.Opacity         = ($OsdAlpha + 0.5) / 255.0
 $osd.BackColor       = [System.Drawing.ColorTranslator]::FromHtml('#202020')
-# Géométrie identique à l'OSD AHK (mesurée sur sa fenêtre réelle) : tailles
-# en unités AHK mises à l'échelle DPI, position en pixels bruts comme AHK
-# (x = (largeur écran - 300) / 2, y = hauteur écran - 165).
+# Tailles de l'OSD AHK (unités AHK mises à l'échelle DPI). Centré sur la
+# largeur réelle (AHK centrait sur 300 px bruts, donc décalé à droite en
+# DPI > 100 %) ; y = hauteur écran - 165 comme AHK.
 $osd.ClientSize      = New-Object System.Drawing.Size((Px 300.8), (Px 106.4))
 $scr = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
 $osd.Location = New-Object System.Drawing.Point(
-    [int]($scr.X + [Math]::Floor(($scr.Width - 300) / 2)),
+    [int]($scr.X + [Math]::Floor(($scr.Width - $osd.Width) / 2)),
     [int]($scr.Y + $scr.Height - 165))
 
 $txtLabel = New-Object System.Windows.Forms.Label
