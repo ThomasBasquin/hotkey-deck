@@ -1,0 +1,4 @@
+Device: Realtek(R) Audio Realtek Digital Output {02b5c298-83cb-4e73-a121-125a266cdf9f}
+Channel: all
+Preamp: -6.5 dB
+Filter 1: ON LSC Fc 100 Hz Gain 5 dB Q 0.71

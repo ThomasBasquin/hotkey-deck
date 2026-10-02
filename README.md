@@ -59,6 +59,10 @@ Deux versions coexistent :
 
 Le fichier `.ps1` doit rester encodé en **UTF-8 avec BOM** (Windows PowerShell 5.1 lit sinon les accents et symboles de l'OSD en ANSI).
 
+### Sauvegarde des profils
+
+`backup_peace.ps1` copie les profils Peace (`Casque.peace`, `Enceintes.peace`), `peace.ini`, `peace.txt` et `config.txt` dans `peace-config\`. À relancer puis commiter après chaque modification de l'EQ. Pour restaurer, recopier `peace-config\` vers `C:\Program Files\EqualizerAPO\config\` (en admin, Peace fermé). Les GUID des périphériques sont corrigés automatiquement au prochain switch.
+
 ### Diagnostic
 
 Journal dans `%TEMP%\peace_switch.log` (rotation au-delà de 256 Ko) : démarrage, raccourcis non réservables, switchs de profil, mises à jour des modèles, erreurs.
