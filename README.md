@@ -52,7 +52,7 @@ Deux versions coexistent :
 3. Lancement au démarrage via la tâche planifiée **"Peace Preamp Controller"** (déclencheur : ouverture de session, niveau d'exécution : le plus élevé — nécessaire pour pouvoir fermer Peace s'il tourne en admin), action :
 
    ```
-   conhost.exe --headless powershell.exe -NoProfile -Sta -ExecutionPolicy Bypass -File "C:\Users\Thomas\Documents\AutoHotkey\peace_switch.ps1"
+   conhost.exe --headless powershell.exe -NoProfile -Sta -ExecutionPolicy Bypass -File "C:\Users\Thomas\Documents\PeaceSwitch\peace_switch.ps1"
    ```
 
    `conhost --headless` évite le flash d'une fenêtre console. Une seule instance peut tourner à la fois (mutex).
@@ -79,7 +79,7 @@ Journal dans `%TEMP%\peace_switch.log` (rotation au-delà de 256 Ko) : démarrag
 Le script a besoin des droits administrateur (il écrit dans `Program Files\EqualizerAPO\config\`) et s'auto-élève via `RunAs` s'il est lancé manuellement. Pour revenir à cette version au démarrage, remettre comme action de la tâche planifiée **"Peace Preamp Controller"** :
 
 ```
-"C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe" "C:\Users\Thomas\Documents\AutoHotkey\peace_preamp.ahk"
+"C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe" "C:\Users\Thomas\Documents\PeaceSwitch\peace_preamp.ahk"
 ```
 
 Contrairement à la version PowerShell, elle passe par les raccourcis de Peace (`Ctrl+Alt+F1/F2`) pour changer de profil, et réinstalle périodiquement son hook clavier (que certains jeux éjectent).
