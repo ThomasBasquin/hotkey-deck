@@ -637,6 +637,13 @@ $detected = Detect-ProfileFromPeace $lines
 if ($detected) { $S.Active = $detected }
 (GetProfile).Cur = Read-Preamp
 
+# Éteint en mute (Preamp à -60) : on repart démuté, au volume par défaut
+if ((GetProfile).Cur -le -59.95) {
+    (GetProfile).Cur = (GetProfile).Default
+    Write-Preamp (GetProfile).Cur
+    Log "Démarrage : éteint en mute, volume remis par défaut ($(Fmt (GetProfile).Cur) dB)"
+}
+
 $syncTimer = New-Object System.Windows.Forms.Timer
 $syncTimer.Interval = 5000
 $syncTimer.add_Tick({ Safe { Sync-Peace } })
