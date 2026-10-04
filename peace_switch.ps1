@@ -585,6 +585,8 @@ function Toggle-Mute {
 }
 
 function On-Hotkey([int]$id) {
+    # 11..73 = variantes Maj/Ctrl/Alt de F13-F15 (id de base + 10 x combinaison)
+    if ($id -gt 10 -and $id -lt 100) { $id = $id % 10 }
     switch ($id) {
         1   { Volume-Down }
         2   { Volume-Up }
@@ -629,6 +631,20 @@ $failed = @()
 foreach ($h in $hotkeys) {
     $err = $S.Hk.Register($h.Id, $h.Mod, $h.Vk)
     if ($err) { $failed += $h.Name; Log "Raccourci $($h.Name) non réservé (err $err, déjà pris par une autre appli ?)" }
+}
+
+# RegisterHotKey exige les modificateurs exacts : sans ces variantes, F13-F15
+# ne marchent plus en jeu quand Maj (sprint), Ctrl (accroupi) ou Alt est tenu.
+$MOD_SHIFT = 0x4
+foreach ($h in $hotkeys | Where-Object { $_.Id -le 3 }) {
+    foreach ($m in 1..7) {
+        $mod = $h.Mod
+        if ($m -band 1) { $mod = $mod -bor $MOD_SHIFT }
+        if ($m -band 2) { $mod = $mod -bor $MOD_CONTROL }
+        if ($m -band 4) { $mod = $mod -bor $MOD_ALT }
+        $err = $S.Hk.Register($h.Id + 10 * $m, $mod, $h.Vk)
+        if ($err) { Log "Variante de $($h.Name) (mod 0x$('{0:X}' -f $mod)) non réservée (err $err)" }
+    }
 }
 
 # Profil actif = celui qui est réellement dans peace.txt
