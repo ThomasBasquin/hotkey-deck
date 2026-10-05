@@ -15,6 +15,13 @@
 #   Ctrl+Alt+F2      → profil casque
 #   Ctrl+Alt+B       → écran noir (Échap ou clic pour fermer)
 #
+# Micro HyperX QuadCast S : icône dans la zone de notification (verte = actif,
+# rouge barrée = coupé, grise = débranché/inconnu). Le micro n'expose pas son
+# état, mais en capture "raw" (sans les effets Windows type Voice Clarity) il
+# envoie des zéros exacts quand il est coupé, et toujours un souffle de fond
+# quand il est actif. On l'écoute ~0,4 s au démarrage, à chaque appui sur le
+# capteur (rapport HID) et sur clic gauche de l'icône.
+#
 # Les modèles (templates\*.txt) se mettent à jour tout seuls si tu modifies
 # l'EQ dans Peace : la sync périodique recopie le nouveau peace.txt.
 
@@ -24,6 +31,9 @@ $ErrorActionPreference = 'Stop'
 # refuse que ce script les réserve. Peace n'est pas nécessaire au son
 # (c'est Equalizer APO qui applique peace.txt), donc on le ferme.
 $ClosePeace = $true
+
+# Affiche l'OSD ~1 s quand le micro change d'état (l'icône reste dans tous les cas)
+$MicOsd = $true
 
 # ============================================================
 #  INSTANCE UNIQUE
@@ -35,10 +45,248 @@ Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 
 Add-Type -ReferencedAssemblies System.Windows.Forms, System.Drawing -TypeDefinition @'
 using System;
+using System.IO;
 using System.Runtime.InteropServices;
+using System.Threading;
 using System.Windows.Forms;
+using Microsoft.Win32.SafeHandles;
 
 namespace PeaceSwitch {
+    // ---- WASAPI (capture "raw" du micro pour lire son état de mute) ----
+    [ComImport, Guid("A95664D2-9614-4F35-A746-DE8DB63617E6"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    interface IMMDeviceEnumerator {
+        int EnumAudioEndpoints(int flow, int mask, out IMMDeviceCollection col);
+    }
+    [ComImport, Guid("BCDE0395-E52F-467C-8E3D-C4579291692E")] class MMDeviceEnumerator { }
+    [ComImport, Guid("0BD7A1BE-7A1A-44DB-8397-CC5392387B5E"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    interface IMMDeviceCollection {
+        int GetCount(out int n);
+        int Item(int i, out IMMDevice dev);
+    }
+    [ComImport, Guid("D666063F-1587-4E43-81F1-B948E807363F"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    interface IMMDevice {
+        int Activate(ref Guid iid, int ctx, IntPtr p, [MarshalAs(UnmanagedType.IUnknown)] out object o);
+        int OpenPropertyStore(int access, out IPropertyStore ps);
+    }
+    [ComImport, Guid("886d8eeb-8cf2-4446-8d02-cdba1dbdcf99"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    interface IPropertyStore {
+        int GetCount(out int n);
+        int GetAt(int i, out PropKey k);
+        int GetValue(ref PropKey k, out PropVariant v);
+    }
+    [StructLayout(LayoutKind.Sequential)] struct PropKey { public Guid fmtid; public int pid; }
+    [StructLayout(LayoutKind.Sequential)] struct PropVariant { public ushort vt, r1, r2, r3; public IntPtr p, p2; }
+    [ComImport, Guid("726778CD-F60A-4eda-82DE-E47610CD78AA"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    interface IAudioClient2 {
+        int Initialize(int share, int flags, long dur, long period, IntPtr fmt, IntPtr session);
+        int GetBufferSize(out uint n);
+        int GetStreamLatency(out long l);
+        int GetCurrentPadding(out uint p);
+        int IsFormatSupported(int share, IntPtr fmt, out IntPtr closest);
+        int GetMixFormat(out IntPtr fmt);
+        int GetDevicePeriod(out long d, out long m);
+        int Start();
+        int Stop();
+        int Reset();
+        int SetEventHandle(IntPtr h);
+        int GetService(ref Guid iid, [MarshalAs(UnmanagedType.IUnknown)] out object o);
+        int IsOffloadCapable(int cat, out int cap);
+        int SetClientProperties(ref AudioClientProperties p);
+    }
+    [StructLayout(LayoutKind.Sequential)] struct AudioClientProperties { public int cbSize, bIsOffload, eCategory, Options; }
+    [ComImport, Guid("C8ADBD64-E71E-48a0-A4DE-185C395CD317"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    interface IAudioCaptureClient {
+        int GetBuffer(out IntPtr data, out uint frames, out uint flags, out ulong pos, out ulong qpc);
+        int ReleaseBuffer(uint frames);
+        int GetNextPacketSize(out uint n);
+    }
+
+    // Suit l'état de mute du QuadCast S, qui ne l'expose pas directement :
+    //  - un thread lit l'interface HID, qui envoie un rapport (01 80 ...) à
+    //    chaque appui sur le capteur de mute (bascule, sans l'état)
+    //  - un second thread écoute alors le micro ~0,4 s en capture "raw"
+    //    (sans les effets Windows) : coupé = zéros exacts, actif = souffle
+    // Le script relit State/Version depuis un timer (pas d'appel inter-thread).
+    public class MicWatcher {
+        [DllImport("cfgmgr32.dll", CharSet = CharSet.Unicode)]
+        static extern int CM_Get_Device_Interface_List_Size(out int len, ref Guid g, string devId, int flags);
+        [DllImport("cfgmgr32.dll", CharSet = CharSet.Unicode)]
+        static extern int CM_Get_Device_Interface_List(ref Guid g, string devId, char[] buf, int len, int flags);
+        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        static extern SafeFileHandle CreateFile(string n, uint acc, uint share, IntPtr sa, uint disp, uint flags, IntPtr t);
+        [DllImport("ole32.dll")] static extern int PropVariantClear(ref PropVariant v);
+
+        static Guid HidGuid = new Guid("4d1e55b2-f16f-11cf-88cb-001111000030");
+        const string HidMatch  = "vid_0951&pid_171d&mi_03&col01";
+        const string NameMatch = "QuadCast";
+
+        public const int Unknown = 0, Active = 1, Muted = 2;
+        public volatile int State;        // dernier état vérifié
+        public volatile int Version;      // +1 à chaque vérification
+        public volatile int Toggles;      // +1 à chaque appui (affichage immédiat)
+        public volatile int CheckedToggles; // valeur de Toggles au début de la vérification
+        public volatile bool Connected;
+        public volatile string LastError;
+
+        readonly AutoResetEvent wake = new AutoResetEvent(false);
+
+        public void Start() {
+            foreach (ThreadStart f in new ThreadStart[] { HidLoop, CheckLoop }) {
+                var t = new Thread(f);
+                t.IsBackground = true;
+                t.Start();
+            }
+        }
+
+        // Clic sur l'icône : revérifier tout de suite
+        public void Recheck() { wake.Set(); }
+
+        static string FindHidPath() {
+            int len;
+            if (CM_Get_Device_Interface_List_Size(out len, ref HidGuid, null, 0) != 0 || len < 2) return null;
+            var buf = new char[len];
+            if (CM_Get_Device_Interface_List(ref HidGuid, null, buf, len, 0) != 0) return null;
+            foreach (var p in new string(buf).Split('\0'))
+                if (p.ToLowerInvariant().Contains(HidMatch)) return p;
+            return null;
+        }
+
+        void HidLoop() {
+            while (true) {
+                try {
+                    string path = FindHidPath();
+                    if (path != null) {
+                        var h = CreateFile(path, 0x80000000 /* GENERIC_READ */, 3, IntPtr.Zero, 3, 0, IntPtr.Zero);
+                        if (!h.IsInvalid) {
+                            Connected = true;
+                            wake.Set();
+                            try {
+                                using (var fs = new FileStream(h, FileAccess.Read, 1, false)) {
+                                    var b = new byte[64];
+                                    while (true) {
+                                        int n = fs.Read(b, 0, b.Length);
+                                        if (n <= 0) break;
+                                        if (n >= 2 && b[0] == 1 && (b[1] & 0x80) != 0) { Toggles++; wake.Set(); }
+                                    }
+                                }
+                            } catch { }   // micro débranché
+                            Connected = false;
+                            wake.Set();
+                        }
+                    }
+                } catch { }
+                Thread.Sleep(2000);
+            }
+        }
+
+        void CheckLoop() {
+            while (true) {
+                wake.WaitOne();
+                // Laisse passer le bruit de l'appui et regroupe les appuis rapprochés
+                while (wake.WaitOne(400)) { }
+                int s = Unknown;
+                int t = Toggles;
+                if (Connected) {
+                    try { s = CheckOnce(); }
+                    catch (Exception e) { LastError = e.Message; }
+                }
+                State = s;
+                CheckedToggles = t;
+                Version++;
+            }
+        }
+
+        static IMMDevice FindCaptureDevice() {
+            var en = (IMMDeviceEnumerator)new MMDeviceEnumerator();
+            IMMDeviceCollection col;
+            if (en.EnumAudioEndpoints(1 /* eCapture */, 1 /* ACTIVE */, out col) != 0) return null;
+            int n;
+            col.GetCount(out n);
+            var key = new PropKey { fmtid = new Guid("a45c254e-df1c-4efd-8020-67d146a850e0"), pid = 14 };
+            for (int i = 0; i < n; i++) {
+                IMMDevice dev;
+                col.Item(i, out dev);
+                IPropertyStore ps;
+                if (dev.OpenPropertyStore(0, out ps) != 0) continue;
+                PropVariant v;
+                if (ps.GetValue(ref key, out v) != 0) continue;
+                string name = v.vt == 31 ? Marshal.PtrToStringUni(v.p) : null;
+                PropVariantClear(ref v);
+                if (name != null && name.IndexOf(NameMatch, StringComparison.OrdinalIgnoreCase) >= 0) return dev;
+            }
+            return null;
+        }
+
+        int CheckOnce() {
+            var dev = FindCaptureDevice();
+            if (dev == null) { LastError = "endpoint micro introuvable"; return Unknown; }
+            var iid = new Guid("726778CD-F60A-4eda-82DE-E47610CD78AA");
+            object o;
+            int hr = dev.Activate(ref iid, 23 /* CLSCTX_ALL */, IntPtr.Zero, out o);
+            if (hr != 0) { LastError = "Activate 0x" + hr.ToString("X8"); return Unknown; }
+            var ac = (IAudioClient2)o;
+            var props = new AudioClientProperties { cbSize = 16, Options = 1 /* RAW */ };
+            hr = ac.SetClientProperties(ref props);
+            if (hr != 0) { LastError = "mode raw refusé 0x" + hr.ToString("X8"); return Unknown; }
+            IntPtr fmt;
+            ac.GetMixFormat(out fmt);
+            int ch = Marshal.ReadInt16(fmt, 2), bits = Marshal.ReadInt16(fmt, 14), rate = Marshal.ReadInt32(fmt, 4);
+            hr = ac.Initialize(0 /* partagé */, 0, 2000000, 0, fmt, IntPtr.Zero);
+            Marshal.FreeCoTaskMem(fmt);
+            if (hr != 0) { LastError = "Initialize 0x" + hr.ToString("X8"); return Unknown; }
+            var ciid = new Guid("C8ADBD64-E71E-48a0-A4DE-185C395CD317");
+            object co;
+            ac.GetService(ref ciid, out co);
+            var cc = (IAudioCaptureClient)co;
+
+            // On ignore les 150 premières ms (démarrage du flux), puis on
+            // juge sur au moins 250 ms : un seul échantillon non nul = actif.
+            long needed = (long)rate * ch / 4, judged = 0;
+            bool nonZero = false;
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            ac.Start();
+            try {
+                while (!nonZero && sw.ElapsedMilliseconds < 1000 && (judged < needed || sw.ElapsedMilliseconds < 400)) {
+                    uint pk;
+                    cc.GetNextPacketSize(out pk);
+                    while (pk > 0) {
+                        IntPtr d; uint fr, fl; ulong a, b;
+                        cc.GetBuffer(out d, out fr, out fl, out a, out b);
+                        int cnt = (int)fr * ch;
+                        if (sw.ElapsedMilliseconds >= 150) {
+                            judged += cnt;
+                            if ((fl & 2) == 0 /* pas SILENT */ && !nonZero) {
+                                if (bits == 32) {
+                                    var buf = new int[cnt];
+                                    Marshal.Copy(d, buf, 0, cnt);
+                                    foreach (var x in buf) if ((x & 0x7FFFFFFF) != 0) { nonZero = true; break; }
+                                } else if (bits == 16) {
+                                    var buf = new short[cnt];
+                                    Marshal.Copy(d, buf, 0, cnt);
+                                    foreach (var x in buf) if (x != 0) { nonZero = true; break; }
+                                } else {
+                                    var buf = new byte[cnt * bits / 8];
+                                    Marshal.Copy(d, buf, 0, buf.Length);
+                                    foreach (var x in buf) if (x != 0) { nonZero = true; break; }
+                                }
+                            }
+                        }
+                        cc.ReleaseBuffer(fr);
+                        cc.GetNextPacketSize(out pk);
+                    }
+                    Thread.Sleep(10);
+                }
+            } finally {
+                ac.Stop();
+                Marshal.ReleaseComObject(cc);
+                Marshal.ReleaseComObject(ac);
+            }
+            if (nonZero) return Active;
+            if (judged < needed) { LastError = "pas assez d'audio reçu"; return Unknown; }
+            return Muted;
+        }
+    }
+
     // Fenêtre invisible qui reçoit les WM_HOTKEY de RegisterHotKey
     public class HotkeyWindow : NativeWindow {
         [DllImport("user32.dll", SetLastError = true)]
@@ -468,6 +716,18 @@ $txtValue.ForeColor = [System.Drawing.Color]::White
 $txtValue.Bounds    = New-Object System.Drawing.Rectangle((Px 10), (Px 54), (Px 280), (Px 40))
 $osd.Controls.Add($txtValue)
 
+# Icône optionnelle devant la valeur (glyphe Segoe Fluent Icons, ex. micro)
+$txtIcon = New-Object System.Windows.Forms.Label
+$txtIcon.AutoSize  = $false
+$txtIcon.TextAlign = 'MiddleCenter'
+$IconFont    = New-Object System.Drawing.Font('Segoe Fluent Icons', 20)
+$IconFontBig = New-Object System.Drawing.Font('Segoe Fluent Icons', 26)
+$txtIcon.Font      = $IconFont
+$txtIcon.ForeColor = [System.Drawing.Color]::White
+$txtIcon.Visible   = $false
+$osd.Controls.Add($txtIcon)
+$txtIcon.BringToFront()
+
 # Coins arrondis Windows 11 + ombre
 $osd.add_HandleCreated({
     $v = 2
@@ -489,12 +749,41 @@ $osdTimer.add_Tick({ Safe {
     }
 }})
 
-function Show-Osd([string]$label, [string]$value, [int]$durationMs = 0, [string]$bgColor = '202020') {
+$ValueBounds = $txtValue.Bounds
+
+function Show-Osd([string]$label, [string]$value, [int]$durationMs = 0, [string]$bgColor = '202020', [string]$glyph = '') {
     $dur = if ($durationMs -gt 0) { $durationMs } else { 2000 }
     $osd.BackColor = [System.Drawing.ColorTranslator]::FromHtml("#$bgColor")
     $txtLabel.ForeColor = [System.Drawing.ColorTranslator]::FromHtml($(if ($bgColor -eq '801010') { '#FFCCCC' } else { '#AAAAAA' }))
     $txtLabel.Text = $label
     $txtValue.Text = $value
+    if ($glyph -and -not $value) {
+        # Icône seule, centrée à la place de la valeur
+        $txtIcon.Font      = $IconFontBig
+        $txtIcon.Text      = $glyph
+        $txtIcon.BackColor = $osd.BackColor
+        $txtIcon.Bounds    = $ValueBounds
+        $txtIcon.Visible   = $true
+        $txtValue.Visible  = $false
+    } elseif ($glyph) {
+        # Icône + texte centrés ensemble sur la ligne de la valeur
+        $txtIcon.Font = $IconFont
+        $txtValue.Visible = $true
+        $tw  = [System.Windows.Forms.TextRenderer]::MeasureText($value, $txtValue.Font).Width
+        $iw  = Px 32; $gap = Px 6
+        $x   = [int](($osd.ClientSize.Width - ($iw + $gap + $tw)) / 2)
+        $txtIcon.Text      = $glyph
+        $txtIcon.BackColor = $osd.BackColor
+        $txtIcon.Bounds    = New-Object System.Drawing.Rectangle($x, $ValueBounds.Y, $iw, $ValueBounds.Height)
+        $txtValue.TextAlign = 'MiddleLeft'
+        $txtValue.Bounds    = New-Object System.Drawing.Rectangle(($x + $iw + $gap), $ValueBounds.Y, ($tw + (Px 4)), $ValueBounds.Height)
+        $txtIcon.Visible   = $true
+    } else {
+        $txtIcon.Visible    = $false
+        $txtValue.Visible   = $true
+        $txtValue.TextAlign = 'MiddleCenter'
+        $txtValue.Bounds    = $ValueBounds
+    }
     Set-OsdAlpha $OsdAlpha
     $S.OsdHideAt   = [DateTime]::Now.AddMilliseconds($dur)
     if (-not $osd.Visible) { $osd.Show() }
@@ -532,6 +821,117 @@ function Hide-BlackScreen {
     $S.Hk.Unregister(100)
     foreach ($f in $S.Black) { $f.Close(); $f.Dispose() }
     $S.Black = @()
+}
+
+# ============================================================
+#  MICRO (HyperX QuadCast S)
+# ============================================================
+function New-MicIcon([string]$hex, [bool]$slash) {
+    $bmp = New-Object System.Drawing.Bitmap 32, 32
+    $g = [System.Drawing.Graphics]::FromImage($bmp)
+    $g.SmoothingMode = 'AntiAlias'
+    $c = [System.Drawing.ColorTranslator]::FromHtml("#$hex")
+    $br = New-Object System.Drawing.SolidBrush $c
+    $pen = New-Object System.Drawing.Pen $c, 2.5
+
+    # Capsule
+    $cap = New-Object System.Drawing.Drawing2D.GraphicsPath
+    $cap.AddArc(11, 2, 10, 10, 180, 180)
+    $cap.AddArc(11, 10, 10, 10, 0, 180)
+    $cap.CloseFigure()
+    $g.FillPath($br, $cap)
+    # Arceau, pied et socle
+    $g.DrawArc($pen, 7, 8, 18, 16, 0, 180)
+    $g.DrawLine($pen, 16, 24, 16, 29)
+    $g.DrawLine($pen, 10, 29, 22, 29)
+    if ($slash) {
+        $g.DrawLine((New-Object System.Drawing.Pen $c, 3.5), 4, 3, 28, 29)
+    }
+    $g.Dispose()
+    [System.Drawing.Icon]::FromHandle($bmp.GetHicon())
+}
+
+$MicIcons = @{
+    On   = New-MicIcon '3FB950' $false
+    Off  = New-MicIcon 'F85149' $true
+    Gone = New-MicIcon '8B949E' $true
+}
+
+$S.Mic = @{ Ver = 0; Tog = 0; State = -1; Connected = $null }
+
+$tray = New-Object System.Windows.Forms.NotifyIcon
+$tray.Icon    = $MicIcons.Gone
+$tray.Text    = 'QuadCast : recherche…'
+$tray.Visible = $true
+
+function Update-MicIcon {
+    $m = $S.Mic
+    if (-not $m.Connected) {
+        $tray.Icon = $MicIcons.Gone; $tray.Text = 'QuadCast : débranché'
+    } elseif ($m.State -eq [PeaceSwitch.MicWatcher]::Muted) {
+        $tray.Icon = $MicIcons.Off;  $tray.Text = 'QuadCast : COUPÉ'
+    } elseif ($m.State -eq [PeaceSwitch.MicWatcher]::Active) {
+        $tray.Icon = $MicIcons.On;   $tray.Text = 'QuadCast : actif'
+    } else {
+        $tray.Icon = $MicIcons.Gone; $tray.Text = 'QuadCast : état inconnu (clic = revérifier)'
+    }
+}
+
+function Show-MicOsd {
+    if (-not $MicOsd) { return }
+    # Coupé : icône seule (glyphe Segoe Fluent Icons F781 = micro barré)
+    if ($S.Mic.State -eq [PeaceSwitch.MicWatcher]::Muted) { Show-Osd 'Micro' '' 1000 '202020' ([string][char]0xF781) }
+    else                                                  { Show-Osd 'Micro' 'Activé' 1000 }
+}
+
+$micWatcher = New-Object PeaceSwitch.MicWatcher
+
+# Clic gauche : revérifie l'état réel du micro
+$tray.add_MouseClick({ param($src, $e) if ($e.Button -eq 'Left') { Safe { $micWatcher.Recheck() } } })
+
+function Poll-Mic {
+    $m = $S.Mic
+    $con = $micWatcher.Connected
+    if ($con -ne $m.Connected) {
+        $m.Connected = $con
+        Log "Micro : QuadCast $(if ($con) { 'détecté' } else { 'débranché' })"
+        if (-not $con) { $m.State = -1 }
+        Update-MicIcon
+    }
+
+    # Appui sur le capteur : on affiche tout de suite l'état inversé,
+    # la vérification audio qui suit corrigera si besoin
+    $tog = $micWatcher.Toggles
+    if ($tog -ne $m.Tog) {
+        $odd = (($tog - $m.Tog) % 2) -ne 0
+        $m.Tog = $tog
+        if ($odd -and $m.State -gt 0) {
+            $m.State = 3 - $m.State   # Active (1) <-> Muted (2)
+            Update-MicIcon
+            Show-MicOsd
+        }
+    }
+
+    $ver = $micWatcher.Version
+    if ($ver -ne $m.Ver) {
+        $m.Ver = $ver
+        # Résultat périmé si un appui a eu lieu pendant la vérification
+        # (une nouvelle vérification est déjà en route)
+        if ($micWatcher.CheckedToggles -ne $micWatcher.Toggles) { return }
+        $prev = $m.State
+        $m.State = $micWatcher.State
+        if ($m.State -eq [PeaceSwitch.MicWatcher]::Unknown -and $m.Connected) {
+            Log "Micro : vérification impossible ($($micWatcher.LastError))"
+        }
+        if ($m.State -ne $prev) {
+            Update-MicIcon
+            # Correction d'un affichage faux (pas au démarrage)
+            if ($prev -gt 0 -and $m.State -gt 0) {
+                Log "Micro : état corrigé par la vérification"
+                Show-MicOsd
+            }
+        }
+    }
 }
 
 # ============================================================
@@ -664,6 +1064,12 @@ $syncTimer = New-Object System.Windows.Forms.Timer
 $syncTimer.Interval = 5000
 $syncTimer.add_Tick({ Safe { Sync-Peace } })
 $syncTimer.Start()
+
+$micWatcher.Start()
+$micTimer = New-Object System.Windows.Forms.Timer
+$micTimer.Interval = 50
+$micTimer.add_Tick({ Safe { Poll-Mic } })
+$micTimer.Start()
 
 Log "Démarrage script — profil actif détecté : $((GetProfile).Label) ($(Fmt (GetProfile).Cur) dB)"
 if ($failed.Count) {
