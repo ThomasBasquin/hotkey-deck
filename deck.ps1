@@ -73,7 +73,7 @@ namespace HotkeyDeck {
 
         // Dimensions en pixels à 100 % : carte, écart entre cartes d'une colonne,
         // entre colonnes, marge, titres de colonnes, barre d'état
-        const int TW = 160, TH = 128, GAP = 12, COLGAP = 22, PAD = 18, HEAD = 30, BAR = 40, LINE = 2;   // LINE : écart entre le trait et la barre d'état
+        const int TW = 160, TH = 128, GAP = 12, COLGAP = 22, PAD = 18, HEAD = 30, BAR = 40, LINE = 11;   // LINE : écart entre le trait et la barre d'état
 
         public List<Tile> Tiles = new List<Tile>();
         public string[] Headers = new string[0];   // titres des colonnes de boutons
@@ -208,7 +208,7 @@ namespace HotkeyDeck {
             int gridBottom = top + rows * TH + (rows - 1) * GAP;
             // Trait de séparation à égale distance des cartes et du texte de la
             // barre (texte centré dans BAR), marge du bas proche de celle du haut
-            int barTop = gridBottom + 16 + LINE;
+            int barTop = gridBottom + 24 + LINE;
             barRect = new Rectangle(Px(PAD), Px(barTop), Px(w - 2 * PAD), Px(BAR));
             int k = 0;
             foreach (var t in Tiles) {
