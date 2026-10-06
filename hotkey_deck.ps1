@@ -797,8 +797,9 @@ function Show-Osd([string]$label, [string]$value, [int]$durationMs = 0, [string]
         $txtIcon.Text      = $glyph
         $txtIcon.BackColor = $osd.BackColor
         # Boîte de l'icône un peu plus large que le glyphe (centré dedans) pour
-        # ne pas le rogner
-        $txtIcon.Bounds    = New-Object System.Drawing.Rectangle(($x - (Px 6)), $vb.Y, ($iw + (Px 12)), $vb.Height)
+        # ne pas le rogner, et descendue de 3 px : le milieu de l'icône tombe
+        # alors sur le milieu des majuscules du texte (mesuré à l'écran)
+        $txtIcon.Bounds    = New-Object System.Drawing.Rectangle(($x - (Px 6)), ($vb.Y + (Px 3)), ($iw + (Px 12)), $vb.Height)
         $txtValue.TextAlign = 'MiddleLeft'
         $txtValue.Bounds    = New-Object System.Drawing.Rectangle(($x + $iw + $gap), $vb.Y, ($tw + (Px 4)), $vb.Height)
         $txtIcon.Visible   = $true
