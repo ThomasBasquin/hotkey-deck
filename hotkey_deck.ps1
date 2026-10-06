@@ -1,7 +1,8 @@
-﻿# PeaceSwitch — portage PowerShell de peace_preamp.ahk
+﻿# hotkey-deck — raccourcis clavier et deck à l'écran pour le PC
 #
-# Même fonctionnalités que le script AHK, mais SANS hook clavier/souris
-# bas niveau ni injection de touches (ce qui faisait réagir l'anti-cheat) :
+# Né comme portage PowerShell de peace_preamp.ahk (preamp de Peace / Equalizer
+# APO), sans hook clavier/souris bas niveau ni injection de touches (ce qui
+# faisait réagir l'anti-cheat) :
 #   - raccourcis via RegisterHotKey (API standard, comme Discord/OBS)
 #   - le switch casque/enceintes écrit directement peace.txt (lu par
 #     Equalizer APO) à partir de modèles capturés depuis Peace, au lieu
@@ -39,7 +40,7 @@ $MicOsd = $true
 # ============================================================
 #  INSTANCE UNIQUE
 # ============================================================
-$mutex = New-Object System.Threading.Mutex($false, 'Local\PeaceSwitch')
+$mutex = New-Object System.Threading.Mutex($false, 'Local\HotkeyDeck')
 if (-not $mutex.WaitOne(0)) { exit }
 
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
@@ -52,7 +53,7 @@ using System.Threading;
 using System.Windows.Forms;
 using Microsoft.Win32.SafeHandles;
 
-namespace PeaceSwitch {
+namespace HotkeyDeck {
     // ---- WASAPI (capture "raw" du micro pour lire son état de mute) ----
     [ComImport, Guid("A95664D2-9614-4F35-A746-DE8DB63617E6"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
     interface IMMDeviceEnumerator {
@@ -396,7 +397,7 @@ namespace PeaceSwitch {
 }
 '@
 
-[PeaceSwitch.Native]::EnableDpiAwareness()
+[HotkeyDeck.Native]::EnableDpiAwareness()
 [System.Windows.Forms.Application]::EnableVisualStyles()
 
 $Inv = [System.Globalization.CultureInfo]::InvariantCulture
@@ -409,7 +410,7 @@ $S = @{
     PeaceDir     = 'C:\Program Files\EqualizerAPO\config'
     PeaceFile    = 'C:\Program Files\EqualizerAPO\config\peace.txt'
     TemplatesDir = Join-Path $PSScriptRoot 'templates'
-    LogFile      = Join-Path $env:TEMP 'peace_switch.log'
+    LogFile      = Join-Path $env:TEMP 'hotkey_deck.log'
     Active       = 'enceintes'
     Muted        = $false
     Black        = @()
@@ -607,7 +608,7 @@ function Switch-Profile([string]$key) {
     }
 
     # Sortie Windows par défaut
-    $hr = [PeaceSwitch.Native]::SetDefaultAudioDevice("{0.0.0.00000000}.$guid")
+    $hr = [HotkeyDeck.Native]::SetDefaultAudioDevice("{0.0.0.00000000}.$guid")
     if ($hr -ne 0) { Log ("SetDefaultAudioDevice HRESULT=0x{0:X8}" -f $hr) }
 
     # peace.txt = modèle du profil, avec le GUID actuel du device (anti-dérive)
@@ -683,7 +684,7 @@ function Px([double]$v) { [int][Math]::Round($v * $Scale) }
 # +0.5 : WinForms tronque Opacity*255 en octet, ça garantit la valeur exacte.
 $OsdAlpha = 242
 function Set-OsdAlpha([int]$a) { $S.Alpha = $a; $osd.Opacity = ($a + 0.5) / 255.0 }
-$osd = New-Object PeaceSwitch.OsdForm
+$osd = New-Object HotkeyDeck.OsdForm
 $osd.FormBorderStyle = 'None'
 $osd.StartPosition   = 'Manual'
 $osd.ShowInTaskbar   = $false
@@ -732,8 +733,8 @@ $txtIcon.BringToFront()
 # Coins arrondis Windows 11 + ombre
 $osd.add_HandleCreated({
     $v = 2
-    [PeaceSwitch.Native]::DwmSetWindowAttribute($osd.Handle, 33, [ref]$v, 4) | Out-Null
-    [PeaceSwitch.Native]::DwmSetWindowAttribute($osd.Handle, 2,  [ref]$v, 4) | Out-Null
+    [HotkeyDeck.Native]::DwmSetWindowAttribute($osd.Handle, 33, [ref]$v, 4) | Out-Null
+    [HotkeyDeck.Native]::DwmSetWindowAttribute($osd.Handle, 2,  [ref]$v, 4) | Out-Null
 })
 
 $osdTimer = New-Object System.Windows.Forms.Timer
@@ -800,7 +801,7 @@ function Show-Osd([string]$label, [string]$value, [int]$durationMs = 0, [string]
 # ou sur clic gauche.
 function Show-BlackScreen {
     foreach ($screen in [System.Windows.Forms.Screen]::AllScreens) {
-        $f = New-Object PeaceSwitch.BlackForm
+        $f = New-Object HotkeyDeck.BlackForm
         $f.FormBorderStyle = 'None'
         $f.StartPosition   = 'Manual'
         $f.ShowInTaskbar   = $false
@@ -811,7 +812,7 @@ function Show-BlackScreen {
         # Le déplacement vers un écran à autre DPI peut redimensionner la
         # fenêtre : on réimpose les dimensions physiques de l'écran.
         $b = $screen.Bounds
-        [PeaceSwitch.Native]::PlaceTopmost($f.Handle, $b.X, $b.Y, $b.Width, $b.Height)
+        [HotkeyDeck.Native]::PlaceTopmost($f.Handle, $b.X, $b.Y, $b.Width, $b.Height)
         $S.Black += $f
     }
     $err = $S.Hk.Register(100, 0, 0x1B)   # Échap
@@ -869,9 +870,9 @@ function Update-MicIcon {
     $m = $S.Mic
     if (-not $m.Connected) {
         $tray.Icon = $MicIcons.Gone; $tray.Text = 'QuadCast : débranché'
-    } elseif ($m.State -eq [PeaceSwitch.MicWatcher]::Muted) {
+    } elseif ($m.State -eq [HotkeyDeck.MicWatcher]::Muted) {
         $tray.Icon = $MicIcons.Off;  $tray.Text = 'QuadCast : COUPÉ'
-    } elseif ($m.State -eq [PeaceSwitch.MicWatcher]::Active) {
+    } elseif ($m.State -eq [HotkeyDeck.MicWatcher]::Active) {
         $tray.Icon = $MicIcons.On;   $tray.Text = 'QuadCast : actif'
     } else {
         $tray.Icon = $MicIcons.Gone; $tray.Text = 'QuadCast : état inconnu (clic = revérifier)'
@@ -881,11 +882,11 @@ function Update-MicIcon {
 function Show-MicOsd {
     if (-not $MicOsd) { return }
     # Coupé : icône seule (glyphe Segoe Fluent Icons F781 = micro barré)
-    if ($S.Mic.State -eq [PeaceSwitch.MicWatcher]::Muted) { Show-Osd 'Micro' '' 1000 '202020' ([string][char]0xF781) }
+    if ($S.Mic.State -eq [HotkeyDeck.MicWatcher]::Muted) { Show-Osd 'Micro' '' 1000 '202020' ([string][char]0xF781) }
     else                                                  { Show-Osd 'Micro' 'Activé' 1000 }
 }
 
-$micWatcher = New-Object PeaceSwitch.MicWatcher
+$micWatcher = New-Object HotkeyDeck.MicWatcher
 
 # Clic gauche : revérifie l'état réel du micro
 $tray.add_MouseClick({ param($src, $e) if ($e.Button -eq 'Left') { Safe { $micWatcher.Recheck() } } })
@@ -921,7 +922,7 @@ function Poll-Mic {
         if ($micWatcher.CheckedToggles -ne $micWatcher.Toggles) { return }
         $prev = $m.State
         $m.State = $micWatcher.State
-        if ($m.State -eq [PeaceSwitch.MicWatcher]::Unknown -and $m.Connected) {
+        if ($m.State -eq [HotkeyDeck.MicWatcher]::Unknown -and $m.Connected) {
             Log "Micro : vérification impossible ($($micWatcher.LastError))"
         }
         if ($m.State -ne $prev) {
@@ -1017,7 +1018,7 @@ if ($ClosePeace) {
     }
 }
 
-$S.Hk = New-Object PeaceSwitch.HotkeyWindow
+$S.Hk = New-Object HotkeyDeck.HotkeyWindow
 $S.Hk.add_Pressed({ param($id) Safe { On-Hotkey $id } })
 
 $MOD_ALT = 0x1; $MOD_CONTROL = 0x2; $MOD_NOREPEAT = 0x4000

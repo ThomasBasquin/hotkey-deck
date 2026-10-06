@@ -1,43 +1,40 @@
-# Peace Preamp AHK
+# hotkey-deck
 
-Contrôle du preamp de [Peace](https://sourceforge.net/projects/peace-equalizer-apo-extension/) (interface graphique d'Equalizer APO) avec un OSD à l'écran, et bascule casque/enceintes.
+Raccourcis clavier et deck à l'écran pour piloter un PC Windows de jeu, sans se faire repérer par les anti-cheats :
 
-Deux versions coexistent :
+- **Son** : volume (preamp d'[Equalizer APO](https://sourceforge.net/projects/equalizerapo/) / [Peace](https://sourceforge.net/projects/peace-equalizer-apo-extension/)) avec OSD, mute, bascule casque/enceintes
+- **Micro** : état du HyperX QuadCast S (actif / coupé) dans la zone de notification et à l'OSD
+- **Écran** : écran noir anti burn-in OLED, bascule du HDR Windows
+- **GPU** : bascule entre les profils MSI Afterburner stock et overclock, températures CPU/GPU
+- **Enregistrement** : sauvegarde de l'Instant Replay NVIDIA
 
-| Fichier | Statut | Notes |
-|---------|--------|-------|
-| `peace_switch.ps1` | **Version principale** (PowerShell) | Aucun hook clavier/souris ni injection de touches dans le jeu : n'est pas détecté comme logiciel de triche par les anti-cheats (ex. Easy Anti-Cheat dans The Finals) |
-| `peace_preamp.ahk` | Version d'origine (AutoHotkey v2) | Conservée comme référence / repli ; son hook clavier bas niveau et le binaire AutoHotkey sont détectés par certains anti-cheats |
+Tout tient dans un script PowerShell lancé au démarrage. Le projet est né comme simple contrôle du preamp de Peace en AutoHotkey (`peace_preamp.ahk`, conservé comme repli).
 
-## Fonctionnalités
-
-- Réglage du preamp par pas de 0.5 dB avec affichage OSD
-- Deux profils : **Casque** (plafond -8 dB) et **Enceintes** (plafond -5 dB). Chaque plafond vaut l'opposé du plus gros boost de l'EQ du profil (+8 / +5 dB), pour que le signal ne sature jamais
-- Mute toggle
-- Avertissement visuel à l'approche du plafond
-- Synchronisation périodique avec `peace.txt` (détecte les changements externes)
-- OSD affichant le profil actif dès le lancement du script
-- Bascule de la sortie audio Windows par défaut avec le profil
-- Correction automatique du GUID du périphérique (DAC USB qui change d'identité), avec nouvelle tentative (~1.2 s) si le périphérique n'est pas encore actif
-- Écran noir anti burn-in OLED sur tous les écrans (Échap ou clic pour fermer)
+| Fichier | Rôle |
+|---------|------|
+| `hotkey_deck.ps1` | **Script principal** : raccourcis, son, micro, OSD, écran noir ; charge `deck.ps1` |
+| `deck.ps1` | Deck à l'écran (touche `²`) |
+| `backup_peace.ps1` | Sauvegarde des profils Peace dans `peace-config\` |
+| `templates\` | Modèles `peace.txt` des profils Casque / Enceintes |
+| `peace_preamp.ahk` | Version d'origine (AutoHotkey v2), détectée par certains anti-cheats |
 
 ## Raccourcis
 
 | Raccourci | Action |
 |-----------|--------|
-| `F13` | Baisser le preamp (-0.5 dB) |
-| `F14` | Monter le preamp (+0.5 dB) |
-| `F15` | Toggle mute |
+| `F13` | Baisser le volume (-0.5 dB) |
+| `F14` | Monter le volume (+0.5 dB) |
+| `F15` | Mute |
 | `Ctrl+Alt+F1` | Profil Enceintes |
 | `Ctrl+Alt+F2` | Profil Casque |
-| `Ctrl+Alt+B` | Écran noir |
-| `²` | Deck à l'écran (PowerShell uniquement) |
+| `Ctrl+Alt+B` | Écran noir (Échap ou clic pour fermer) |
+| `²` | Deck à l'écran |
 
-> Les touches F13–F15 sont typiquement assignées via un clavier programmable ou un logiciel de remapping.
+> Les touches F13–F15 sont assignées via un clavier programmable (molette). Elles marchent aussi avec Maj/Ctrl/Alt enfoncés (sprint, accroupi en jeu).
 
-## Deck à l'écran (`deck.ps1`)
+## Deck à l'écran
 
-Équivalent d'un Stream Deck affiché par-dessus l'écran, chargé par `peace_switch.ps1`. La touche **²** l'ouvre au centre de l'écran de la fenêtre active. On clique sur un bouton, ou on tape son numéro (1–6). Échap, ² ou un clic ailleurs le referment, et le focus revient au jeu.
+Équivalent d'un Stream Deck affiché par-dessus l'écran. La touche **²** l'ouvre au centre de l'écran de la fenêtre active. On clique sur un bouton, ou on tape son numéro (1–6). Échap, ² ou un clic ailleurs le referment, et le focus revient au jeu.
 
 | Bouton | Action |
 |--------|--------|
@@ -51,34 +48,53 @@ Deux versions coexistent :
 
 Les numéros de profils Afterburner et le raccourci NVIDIA sont réglables dans `$Deck`, en haut de `deck.ps1`.
 
-**Anti-cheat** : la touche ² est réservée via `RegisterHotKey` comme les autres raccourcis (Windows l'avale : elle ne tape plus de ², ni dans les jeux qui l'utilisent pour leur console), pas de hook clavier. Les mesures se font en lecture seule (mémoire partagée Afterburner, NVML). La seule entrée simulée est `Alt+F10` (NVIDIA n'offre pas d'API pour l'Instant Replay) : elle est envoyée pendant que le deck a le focus, donc le jeu ne la reçoit pas.
-
 **Plein écran** : le deck s'affiche par-dessus les jeux en plein écran fenêtré / sans bordure (cas de la plupart des jeux DX12 / DX11 récents). Aucun programme externe ne peut s'afficher par-dessus un jeu en plein écran **exclusif** sans s'injecter dans son rendu (ce que font seulement les overlays autorisés par les anti-cheats : Steam, Discord, NVIDIA). Dans ce cas, le deck s'ouvre sur l'autre écran.
 
-## Version PowerShell (`peace_switch.ps1`)
+## Compatibilité anti-cheat
 
-### Différences de fonctionnement avec la version AHK
+La première version (AutoHotkey) était détectée par Easy Anti-Cheat (The Finals) à cause de son hook clavier bas niveau. Le script PowerShell n'en utilise aucun :
 
-- **Raccourcis via `RegisterHotKey`** (API Windows standard, comme Discord ou OBS) au lieu d'un hook clavier bas niveau.
-- **Le switch de profil écrit directement `peace.txt`** (lu par Equalizer APO via `Include: peace.txt` dans `config.txt`) au lieu d'envoyer `Ctrl+Alt+F1/F2` à Peace. Le contenu vient de modèles capturés depuis Peace dans `templates/` : seules les lignes `Device:` (GUID actuel) et `Preamp:` sont réécrites.
+- **Raccourcis via `RegisterHotKey`** (API Windows standard, comme Discord ou OBS). Windows avale les touches réservées : `²` ne tape plus de ², y compris dans les jeux qui l'utilisent pour leur console.
+- **Mesures en lecture seule** : mémoire partagée d'Afterburner, NVML, capture audio du micro.
+- **Une seule entrée simulée** : `Alt+F10` pour l'Instant Replay (NVIDIA n'offre pas d'API), envoyée pendant que le deck a le focus, donc jamais reçue par le jeu.
+
+## Son : fonctionnement
+
+- **Le switch de profil écrit directement `peace.txt`** (lu par Equalizer APO via `Include: peace.txt` dans `config.txt`) au lieu d'envoyer `Ctrl+Alt+F1/F2` à Peace. Le contenu vient de modèles capturés depuis Peace dans `templates/` : seules les lignes `Device:` (GUID actuel) et `Preamp:` sont réécrites. La sortie audio Windows par défaut suit le profil.
+- **Plafond par profil** : Casque -8 dB, Enceintes -5 dB. Chaque plafond vaut l'opposé du plus gros boost de l'EQ du profil (+8 / +5 dB), pour que le signal ne sature jamais. L'OSD prévient à l'approche du plafond.
 - **Peace reste cohérent avec le profil appliqué** : à son ouverture, Peace recharge `Last Configuration.peace` (et non le profil sélectionné) puis réécrit `peace.txt` avec. Le switch recopie donc aussi le profil dans `Last Configuration.peace` (après correction de son GUID) et met à jour `Selected Configuration=` dans `peace.ini`, sinon ouvrir Peace annulerait le switch. Limite : changer de profil *pendant* que Peace est ouvert ne met pas son interface à jour, et il réenregistrera son ancien état en se fermant.
-- **Les modèles se mettent à jour seuls** : si l'EQ est modifié dans Peace, la sync périodique recopie le nouveau `peace.txt` dans le modèle du profil concerné.
+- **Les modèles se mettent à jour seuls** : si l'EQ est modifié dans Peace, la sync périodique (5 s) recopie le nouveau `peace.txt` dans le modèle du profil concerné.
+- **GUID du DAC USB corrigé automatiquement** quand il change d'identité, avec nouvelle tentative (~1.2 s) si le périphérique n'est pas encore actif.
 - **Peace est fermé au démarrage** : il réserve lui aussi `Ctrl+Alt+F1/F2`, ce qui empêcherait le script de les obtenir. Il n'est pas nécessaire au son (c'est Equalizer APO qui applique `peace.txt`). Désactivable via `$ClosePeace` en haut du script.
-- **DPI par écran** : l'OSD et l'écran noir s'affichent correctement sur des écrans à mises à l'échelle différentes.
 
-### Installation
+Les profils sont définis dans `$S.Profiles`, en haut de `hotkey_deck.ps1` :
+
+| Paramètre | Description |
+|-----------|-------------|
+| `Default` | Valeur initiale au changement de profil |
+| `Min` | Plancher (dB) |
+| `Max` | Plafond (dB) |
+| `Step` | Pas d'incrémentation (dB) |
+| `WarnZone` | Zone d'avertissement avant le plafond (dB) |
+
+## Micro (HyperX QuadCast S)
+
+Le micro n'expose pas son état de mute. Le script écoute son interface HID, qui signale chaque appui sur le capteur (bascule seulement), puis vérifie l'état réel en capture audio « raw » (sans les effets Windows type Voice Clarity) : coupé = zéros exacts, actif = souffle de fond permanent. Icône verte / rouge barrée / grise dans la zone de notification ; clic gauche = revérifier.
+
+## Installation
 
 1. Installer [Equalizer APO](https://sourceforge.net/projects/equalizerapo/) et [Peace](https://sourceforge.net/projects/peace-equalizer-apo-extension/), créer les profils `Casque.peace` et `Enceintes.peace`.
 2. Capturer les modèles : appliquer chaque profil dans Peace et copier `C:\Program Files\EqualizerAPO\config\peace.txt` vers `templates\casque.txt` / `templates\enceintes.txt`.
-3. Lancement au démarrage via la tâche planifiée **"Peace Preamp Controller"** (déclencheur : ouverture de session, niveau d'exécution : le plus élevé — nécessaire pour pouvoir fermer Peace s'il tourne en admin), action :
+3. Pour le deck : [MSI Afterburner](https://www.msi.com/Landing/afterburner) (profils 1 et 2, monitoring des températures CPU/GPU activé) et l'Instant Replay de l'app NVIDIA (`Alt+F10`).
+4. Lancement au démarrage via la tâche planifiée **"Hotkey Deck"** (déclencheur : ouverture de session, niveau d'exécution : le plus élevé — nécessaire pour écrire dans `Program Files` et fermer Peace s'il tourne en admin), action :
 
    ```
-   conhost.exe --headless powershell.exe -NoProfile -Sta -ExecutionPolicy Bypass -File "C:\Users\Thomas\Documents\PeaceSwitch\peace_switch.ps1"
+   conhost.exe --headless powershell.exe -NoProfile -Sta -ExecutionPolicy Bypass -File "C:\Users\Thomas\Documents\hotkey-deck\hotkey_deck.ps1"
    ```
 
    `conhost --headless` évite le flash d'une fenêtre console. Une seule instance peut tourner à la fois (mutex).
 
-Le fichier `.ps1` doit rester encodé en **UTF-8 avec BOM** (Windows PowerShell 5.1 lit sinon les accents et symboles de l'OSD en ANSI).
+Les fichiers `.ps1` doivent rester encodés en **UTF-8 avec BOM** (Windows PowerShell 5.1 lit sinon les accents et symboles de l'OSD en ANSI).
 
 ### Sauvegarde des profils
 
@@ -86,37 +102,16 @@ Le fichier `.ps1` doit rester encodé en **UTF-8 avec BOM** (Windows PowerShell 
 
 ### Diagnostic
 
-Journal dans `%TEMP%\peace_switch.log` (rotation au-delà de 256 Ko) : démarrage, raccourcis non réservables, switchs de profil, mises à jour des modèles, erreurs.
+Journal dans `%TEMP%\hotkey_deck.log` (rotation au-delà de 256 Ko) : démarrage, raccourcis non réservables, switchs de profil, mises à jour des modèles, micro, actions du deck, erreurs.
 
 ## Version AutoHotkey (`peace_preamp.ahk`)
 
-### Prérequis
+Version d'origine, limitée au son (preamp, profils, écran noir). Conservée comme repli : son hook clavier bas niveau et le binaire AutoHotkey sont détectés par certains anti-cheats. Elle passe par les raccourcis de Peace (`Ctrl+Alt+F1/F2`) pour changer de profil, réinstalle périodiquement son hook clavier (que certains jeux éjectent) et s'auto-élève via `RunAs` si on la lance à la main.
 
-- [AutoHotkey v2](https://www.autohotkey.com/)
-- Equalizer APO et Peace
-
-### Installation
-
-Le script a besoin des droits administrateur (il écrit dans `Program Files\EqualizerAPO\config\`) et s'auto-élève via `RunAs` s'il est lancé manuellement. Pour revenir à cette version au démarrage, remettre comme action de la tâche planifiée **"Peace Preamp Controller"** :
+Prérequis : [AutoHotkey v2](https://www.autohotkey.com/), Equalizer APO et Peace. Pour y revenir au démarrage, remettre comme action de la tâche planifiée **"Hotkey Deck"** :
 
 ```
-"C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe" "C:\Users\Thomas\Documents\PeaceSwitch\peace_preamp.ahk"
+"C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe" "C:\Users\Thomas\Documents\hotkey-deck\peace_preamp.ahk"
 ```
 
-Contrairement à la version PowerShell, elle passe par les raccourcis de Peace (`Ctrl+Alt+F1/F2`) pour changer de profil, et réinstalle périodiquement son hook clavier (que certains jeux éjectent).
-
-### Diagnostic
-
-Journal dans `%TEMP%\peace_preamp.log` (rotation au-delà de 256 Ko).
-
-## Configuration
-
-Les profils sont définis en haut de chaque script (`$S.Profiles` en PowerShell, `Map` `profiles` en AHK). Chaque profil contient :
-
-| Paramètre | Description |
-|-----------|-------------|
-| `default` | Valeur initiale au changement de profil |
-| `min` | Plancher (dB) |
-| `max` | Plafond (dB) |
-| `step` | Pas d'incrémentation (dB) |
-| `warnZone` | Zone d'avertissement avant le plafond (dB) |
+Journal dans `%TEMP%\peace_preamp.log`. Ses profils sont dans la `Map` `profiles` en haut du script.

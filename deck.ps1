@@ -1,4 +1,4 @@
-﻿# Deck — "Stream Deck" à l'écran, chargé par peace_switch.ps1 (dot-source)
+﻿# Deck — "Stream Deck" à l'écran, chargé par hotkey_deck.ps1 (dot-source)
 #
 # La touche ² (AZERTY, à gauche de 1) ouvre une grille de
 # boutons au centre de l'écran du jeu / de la fenêtre active ; clic, ou touches
@@ -33,7 +33,7 @@ using System.IO.MemoryMappedFiles;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
-namespace PeaceSwitch {
+namespace HotkeyDeck {
     public class Tile {
         public string Id, Glyph = "", Title = "", Sub = "";
         public Color Accent = Color.FromArgb(0x4C, 0xC2, 0xFF);
@@ -470,14 +470,14 @@ namespace PeaceSwitch {
 #  TUILES
 # ============================================================
 function New-Tile([string]$id, [string]$glyph, [string]$accent) {
-    $t = New-Object PeaceSwitch.Tile
+    $t = New-Object HotkeyDeck.Tile
     $t.Id = $id
     $t.Glyph = [string][char][Convert]::ToInt32($glyph, 16)
     $t.Accent = [System.Drawing.ColorTranslator]::FromHtml("#$accent")
     $t
 }
 
-$deck = New-Object PeaceSwitch.DeckForm
+$deck = New-Object HotkeyDeck.DeckForm
 $DeckTiles = [ordered]@{
     audio  = New-Tile 'audio'  'E7F6' '4CC2FF'
     mic    = New-Tile 'mic'    'E720' '3FB950'
@@ -508,10 +508,10 @@ function Update-DeckMic {
     if (-not $m.Connected) {
         $t.Glyph = [string][char]0xF781; $t.Title = 'Micro absent'; $t.On = $false
         $t.Accent = [System.Drawing.ColorTranslator]::FromHtml('#8B949E'); $t.Sub = 'QuadCast débranché'
-    } elseif ($m.State -eq [PeaceSwitch.MicWatcher]::Muted) {
+    } elseif ($m.State -eq [HotkeyDeck.MicWatcher]::Muted) {
         $t.Glyph = [string][char]0xF781; $t.Title = 'Micro coupé'; $t.On = $true
         $t.Accent = [System.Drawing.ColorTranslator]::FromHtml('#F85149')
-    } elseif ($m.State -eq [PeaceSwitch.MicWatcher]::Active) {
+    } elseif ($m.State -eq [HotkeyDeck.MicWatcher]::Active) {
         $t.Glyph = [string][char]0xE720; $t.Title = 'Micro actif'; $t.On = $false
         $t.Accent = [System.Drawing.ColorTranslator]::FromHtml('#3FB950')
     } else {
@@ -522,7 +522,7 @@ function Update-DeckMic {
 
 function Update-DeckHdr {
     $t = $DeckTiles.hdr
-    $h = [PeaceSwitch.HdrControl]::Get()
+    $h = [HotkeyDeck.HdrControl]::Get()
     $t.Title = 'HDR'
     $t.On = $h -eq 1
     $t.Clickable = $h -ge 0
@@ -531,7 +531,7 @@ function Update-DeckHdr {
 
 function Update-DeckGpu {
     $t = $DeckTiles.gpu
-    $oc = [PeaceSwitch.Sensors]::GpuOverclocked()
+    $oc = [HotkeyDeck.Sensors]::GpuOverclocked()
     $t.On = $oc -eq 1
     switch ($oc) {
         1       { $t.Glyph = [string][char]0xEC4A; $t.Title = 'GPU Overclock'; $t.Sub = '→ Stock' }
@@ -544,8 +544,8 @@ function Format-Temp([float]$v) { if ([float]::IsNaN($v)) { '–' } else { '{0:0
 
 function Update-DeckTemps {
     $t = $DeckTiles.temps
-    $ok = [PeaceSwitch.Sensors]::Read()
-    $t.Stats = @('CPU', (Format-Temp ([PeaceSwitch.Sensors]::Cpu)), 'GPU', (Format-Temp ([PeaceSwitch.Sensors]::Gpu)))
+    $ok = [HotkeyDeck.Sensors]::Read()
+    $t.Stats = @('CPU', (Format-Temp ([HotkeyDeck.Sensors]::Cpu)), 'GPU', (Format-Temp ([HotkeyDeck.Sensors]::Gpu)))
     $t.Sub = if ($ok) { '' } else { 'Afterburner fermé' }
 }
 
@@ -553,8 +553,8 @@ function Update-DeckTemps {
 #  ACTIONS
 # ============================================================
 function Toggle-Hdr {
-    $on = [PeaceSwitch.HdrControl]::Get() -ne 1
-    $n = [PeaceSwitch.HdrControl]::Set($on)
+    $on = [HotkeyDeck.HdrControl]::Get() -ne 1
+    $n = [HotkeyDeck.HdrControl]::Set($on)
     Log "Deck : HDR $(if ($on) { 'activé' } else { 'désactivé' }) sur $n écran(s)"
     if ($n -gt 0) { Show-Osd 'HDR' $(if ($on) { 'Activé' } else { 'Désactivé' }) 1500 }
     else          { Show-Osd '⚠ HDR' 'Échec' 2500 '801010' }
@@ -566,7 +566,7 @@ function Toggle-GpuProfile {
         Show-Osd '⚠ GPU' 'Afterburner absent' 2500 '801010'
         return
     }
-    $toOc = [PeaceSwitch.Sensors]::GpuOverclocked() -ne 1
+    $toOc = [HotkeyDeck.Sensors]::GpuOverclocked() -ne 1
     $n = if ($toOc) { $Deck.ProfileOC } else { $Deck.ProfileStock }
     # Une 2e instance d'Afterburner transmet le profil à celle qui tourne, puis se ferme
     Start-Process $Deck.Afterburner -ArgumentList "-Profile$n"
@@ -581,7 +581,7 @@ $deckGpuCheck = New-Object System.Windows.Forms.Timer
 $deckGpuCheck.Interval = 3000
 $deckGpuCheck.add_Tick({ Safe {
     $deckGpuCheck.Stop()
-    $oc = [PeaceSwitch.Sensors]::GpuOverclocked()
+    $oc = [HotkeyDeck.Sensors]::GpuOverclocked()
     if ($oc -ge 0 -and $oc -ne $S.DeckGpuExpect) {
         Log "Deck : le profil Afterburner ne s'est pas appliqué (limite de puissance inchangée)"
         Show-Osd '⚠ GPU' 'Profil non appliqué' 3000 '801010'
@@ -599,7 +599,7 @@ $deckReplayDone.add_Tick({ Safe {
 }})
 
 function Save-Replay {
-    if (-not [PeaceSwitch.KeySender]::Chord([int[]]$Deck.ReplayKeys)) { Log 'Deck : SendInput Alt+F10 refusé' }
+    if (-not [HotkeyDeck.KeySender]::Chord([int[]]$Deck.ReplayKeys)) { Log 'Deck : SendInput Alt+F10 refusé' }
     else { Log 'Deck : Alt+F10 envoyé (Instant Replay)' }
     $deckReplayDone.Start()
 }
