@@ -37,10 +37,10 @@ namespace HotkeyDeck {
     public class Tile {
         public string Id, Glyph = "", Title = "", Sub = "";
         public Color Accent = Color.FromArgb(0x4C, 0xC2, 0xFF);
-        public bool On;              // état actif : fond teinté de la couleur d'accent
+        public bool On;              // état actif : carte « allumée » (teintée de la couleur d'accent)
         public bool Clickable = true;
-        public int Span = 1;
-        public string[] Stats;       // tuile de mesures : libellé, valeur, libellé, valeur...
+        public int Col, Row;         // place dans la grille de boutons ; Row = -1 : barre d'état
+        public string Value = "";    // barre d'état : valeur affichée après le titre
     }
 
     public class DeckForm : Form {
@@ -59,10 +59,12 @@ namespace HotkeyDeck {
         [DllImport("shell32.dll")] static extern int SHQueryUserNotificationState(out int state);
         [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr h, int a, ref int v, int s);
 
-        const int TILE = 112, GAP = 10, PAD = 14;
+        // Dimensions en pixels à 100 % : carte, écart entre cartes d'une colonne,
+        // entre colonnes, marge, titres de colonnes, barre d'état
+        const int TW = 160, TH = 128, GAP = 12, COLGAP = 22, PAD = 18, HEAD = 30, BAR = 54;
 
         public List<Tile> Tiles = new List<Tile>();
-        public int Columns = 4;
+        public string[] Headers = new string[0];   // titres des colonnes de boutons
         public event Action<string> TileClicked;
         public event Action<string> Info;   // historique (journal) : fermetures, focus perdu
         public bool Exclusive;        // plein écran exclusif détecté au dernier affichage
@@ -71,11 +73,12 @@ namespace HotkeyDeck {
         string fgMethod = "";
 
         readonly List<Rectangle> rects = new List<Rectangle>();
+        Rectangle barRect;
         readonly Timer fade = new Timer { Interval = 15 };
         IntPtr prevFg;
         float scale = 1f;
         int hover = -1, pressed = -1;
-        Font fGlyph, fTitle, fSub, fStatLabel, fStatValue, fIndex;
+        Font fGlyph, fTitle, fSub, fHead, fBarLabel, fBarValue, fBarGlyph, fIndex;
 
         public DeckForm() {
             FormBorderStyle = FormBorderStyle.None;
@@ -144,6 +147,16 @@ namespace HotkeyDeck {
         }
 
         int Px(double v) { return (int)Math.Round(v * scale); }
+        // Contenu des cartes : cotes d'origine (carte de 112 de haut) mises à l'échelle de TH
+        int Pu(double v) { return Px(v * TH / 112.0); }
+
+        // Numéro clavier (1-9) des tuiles cliquables, dans l'ordre d'affichage ; 0 = aucun
+        int KeyNumber(int i) {
+            if (!Tiles[i].Clickable) return 0;
+            int n = 0;
+            for (int k = 0; k <= i; k++) if (Tiles[k].Clickable) n++;
+            return n <= 9 ? n : 0;
+        }
 
         // Écran de la fenêtre active, ou un autre si elle est en plein écran exclusif
         Screen PickScreen(IntPtr fg) {
@@ -157,27 +170,42 @@ namespace HotkeyDeck {
         }
 
         void BuildFonts() {
-            foreach (var f in new[] { fGlyph, fTitle, fSub, fStatLabel, fStatValue, fIndex }) if (f != null) f.Dispose();
-            fGlyph     = new Font("Segoe Fluent Icons", Px(30), GraphicsUnit.Pixel);
-            fTitle     = new Font("Segoe UI Semibold", Px(13.5), GraphicsUnit.Pixel);
-            fSub       = new Font("Segoe UI", Px(11.5), GraphicsUnit.Pixel);
-            fStatLabel = new Font("Segoe UI Semibold", Px(12), GraphicsUnit.Pixel);
-            fStatValue = new Font("Segoe UI", Px(34), FontStyle.Bold, GraphicsUnit.Pixel);
-            fIndex     = new Font("Segoe UI", Px(10), GraphicsUnit.Pixel);
+            foreach (var f in new[] { fGlyph, fTitle, fSub, fHead, fBarLabel, fBarValue, fBarGlyph, fIndex }) if (f != null) f.Dispose();
+            fGlyph    = new Font("Segoe Fluent Icons", Pu(30), GraphicsUnit.Pixel);
+            fTitle    = new Font("Segoe UI Semibold", Pu(14), GraphicsUnit.Pixel);
+            fSub      = new Font("Segoe UI", Pu(11.5), GraphicsUnit.Pixel);
+            fHead     = new Font("Segoe UI Semibold", Pu(11), GraphicsUnit.Pixel);
+            fBarLabel = new Font("Segoe UI", Pu(12.5), GraphicsUnit.Pixel);
+            fBarValue = new Font("Segoe UI Semibold", Pu(16), GraphicsUnit.Pixel);
+            fBarGlyph = new Font("Segoe Fluent Icons", Pu(17), GraphicsUnit.Pixel);
+            fIndex    = new Font("Segoe UI", Pu(10), GraphicsUnit.Pixel);
         }
 
+        // Boutons placés par (Col, Row) sous les titres de colonnes ; les
+        // tuiles Row = -1 se partagent la barre d'état en bas, à parts égales
         Size LayoutTiles() {
             rects.Clear();
-            int col = 0, row = 0;
+            int cols = 1, rows = 1, nbar = 0;
             foreach (var t in Tiles) {
-                if (col + t.Span > Columns) { col = 0; row++; }
-                rects.Add(new Rectangle(Px(PAD + col * (TILE + GAP)), Px(PAD + row * (TILE + GAP)),
-                                        Px(t.Span * TILE + (t.Span - 1) * GAP), Px(TILE)));
-                col += t.Span;
+                if (t.Row < 0) { nbar++; continue; }
+                cols = Math.Max(cols, t.Col + 1);
+                rows = Math.Max(rows, t.Row + 1);
             }
-            int rows = row + 1;
-            return new Size(Px(2 * PAD + Columns * TILE + (Columns - 1) * GAP),
-                            Px(2 * PAD + rows * TILE + (rows - 1) * GAP));
+            int top = PAD + (Headers.Length > 0 ? HEAD : 0);
+            int w = 2 * PAD + cols * TW + (cols - 1) * COLGAP;
+            int gridBottom = top + rows * TH + (rows - 1) * GAP;
+            int barTop = gridBottom + 16;
+            barRect = new Rectangle(Px(PAD), Px(barTop), Px(w - 2 * PAD), Px(BAR));
+            int k = 0;
+            foreach (var t in Tiles) {
+                if (t.Row >= 0)
+                    rects.Add(new Rectangle(Px(PAD + t.Col * (TW + COLGAP)), Px(top + t.Row * (TH + GAP)), Px(TW), Px(TH)));
+                else {
+                    rects.Add(new Rectangle(barRect.X + barRect.Width * k / nbar, barRect.Y, barRect.Width / nbar, barRect.Height));
+                    k++;
+                }
+            }
+            return new Size(Px(w), Px(barTop + (nbar > 0 ? BAR : 0) + PAD));
         }
 
         // Processus d'une fenêtre, pour le journal (pas le titre : il peut
@@ -255,10 +283,11 @@ namespace HotkeyDeck {
 
         protected override void OnKeyDown(KeyEventArgs e) {
             if (e.KeyCode == Keys.Escape) { HideDeck(true, "Échap"); return; }
-            int n = -1;
-            if (e.KeyCode >= Keys.D1 && e.KeyCode <= Keys.D9) n = e.KeyCode - Keys.D1;
-            else if (e.KeyCode >= Keys.NumPad1 && e.KeyCode <= Keys.NumPad9) n = e.KeyCode - Keys.NumPad1;
-            if (n >= 0 && n < Tiles.Count) Fire(n);
+            int n = 0;
+            if (e.KeyCode >= Keys.D1 && e.KeyCode <= Keys.D9) n = e.KeyCode - Keys.D1 + 1;
+            else if (e.KeyCode >= Keys.NumPad1 && e.KeyCode <= Keys.NumPad9) n = e.KeyCode - Keys.NumPad1 + 1;
+            if (n == 0) return;
+            for (int i = 0; i < Tiles.Count; i++) if (KeyNumber(i) == n) { Fire(i); return; }
         }
 
         void Fire(int i) {
@@ -312,6 +341,24 @@ namespace HotkeyDeck {
             return Color.White;
         }
 
+        // Élément de la barre d'état, centré : [icône] Titre Valeur
+        // (valeur en couleur d'accent, ou selon la température si elle finit par °)
+        void DrawStatus(Graphics g, Tile t, Rectangle r, Color grey) {
+            var fmt = StringFormat.GenericTypographic;
+            float gw = string.IsNullOrEmpty(t.Glyph) ? 0 : g.MeasureString(t.Glyph, fBarGlyph, 1000, fmt).Width + Pu(6);
+            float lw = g.MeasureString(t.Title, fBarLabel, 1000, fmt).Width + Pu(6);
+            float vw = g.MeasureString(t.Value, fBarValue, 1000, fmt).Width;
+            float x = r.X + (r.Width - gw - lw - vw) / 2, cy = r.Y + r.Height / 2f;
+            Color vc = t.Value.EndsWith("°") ? TempColor(t.Value) : t.Accent;
+            if (gw > 0)
+                using (var b = new SolidBrush(t.Accent))
+                    g.DrawString(t.Glyph, fBarGlyph, b, x, cy - fBarGlyph.GetHeight(g) / 2, fmt);
+            using (var b = new SolidBrush(grey))
+                g.DrawString(t.Title, fBarLabel, b, x + gw, cy - fBarLabel.GetHeight(g) / 2, fmt);
+            using (var b = new SolidBrush(vc))
+                g.DrawString(t.Value, fBarValue, b, x + gw + lw, cy - fBarValue.GetHeight(g) / 2, fmt);
+        }
+
         protected override void OnPaint(PaintEventArgs e) {
             var g = e.Graphics;
             g.Clear(BackColor);
@@ -322,41 +369,43 @@ namespace HotkeyDeck {
             var baseBg = Color.FromArgb(0x2B, 0x2B, 0x2B);
             var grey = Color.FromArgb(0x9A, 0x9A, 0x9A);
 
+            // Titres des colonnes (SON, ÉCRAN, JEU)
+            using (var b = new SolidBrush(Color.FromArgb(0x80, 0x80, 0x80)))
+                for (int c = 0; c < Headers.Length; c++)
+                    g.DrawString(Headers[c], fHead, b, new RectangleF(Px(PAD + c * (TW + COLGAP)), Px(PAD), Px(TW), Px(HEAD - 8)), center);
+
+            // Barre d'état : séparée des boutons par un trait, sans cartes
+            if (barRect.Height > 0)
+                using (var pen = new Pen(Color.FromArgb(0x38, 0x38, 0x38), Math.Max(1, Px(1))))
+                    g.DrawLine(pen, barRect.X, barRect.Y - Px(8), barRect.Right, barRect.Y - Px(8));
+
             for (int i = 0; i < Tiles.Count && i < rects.Count; i++) {
                 var t = Tiles[i];
                 var r = rects[i];
+
+                if (t.Row < 0) { DrawStatus(g, t, r, grey); continue; }
+
                 Color bg = t.On ? Mix(baseBg, t.Accent, 0.28) : baseBg;
                 if (t.Clickable && i == hover) bg = Mix(bg, Color.White, i == pressed ? 0.03 : 0.08);
-                using (var path = Round(r, Px(10)))
+                using (var path = Round(r, Pu(10)))
                 using (var br = new SolidBrush(bg)) {
                     g.FillPath(br, path);
-                    if (t.On) using (var pen = new Pen(Mix(bg, t.Accent, 0.6), Px(1.5))) g.DrawPath(pen, path);
+                    if (t.On) using (var pen = new Pen(Mix(bg, t.Accent, 0.6), Pu(1.5))) g.DrawPath(pen, path);
                 }
 
-                if (t.Stats != null) {
-                    int n = t.Stats.Length / 2;
-                    for (int k = 0; k < n; k++) {
-                        var c = new Rectangle(r.X + r.Width * k / n, r.Y, r.Width / n, r.Height);
-                        using (var b = new SolidBrush(grey))
-                            g.DrawString(t.Stats[2 * k], fStatLabel, b, new RectangleF(c.X, c.Y + Px(14), c.Width, Px(20)), center);
-                        using (var b = new SolidBrush(TempColor(t.Stats[2 * k + 1])))
-                            g.DrawString(t.Stats[2 * k + 1], fStatValue, b, new RectangleF(c.X, c.Y + Px(36), c.Width, Px(48)), center);
-                    }
-                    if (!string.IsNullOrEmpty(t.Sub))
-                        using (var b = new SolidBrush(Color.FromArgb(0x6E, 0x6E, 0x6E)))
-                            g.DrawString(t.Sub, fSub, b, new RectangleF(r.X, r.Bottom - Px(24), r.Width, Px(18)), center);
-                    continue;
-                }
-
+                // Sans sous-titre, icône et titre sont recentrés verticalement
+                int dy = string.IsNullOrEmpty(t.Sub) ? Pu(9) : 0;
                 using (var b = new SolidBrush(t.Accent))
-                    g.DrawString(t.Glyph, fGlyph, b, new RectangleF(r.X, r.Y + Px(14), r.Width, Px(44)), center);
+                    g.DrawString(t.Glyph, fGlyph, b, new RectangleF(r.X, r.Y + Pu(14) + dy, r.Width, Pu(44)), center);
                 using (var b = new SolidBrush(Color.White))
-                    g.DrawString(t.Title, fTitle, b, new RectangleF(r.X + Px(4), r.Y + Px(64), r.Width - Px(8), Px(20)), center);
-                using (var b = new SolidBrush(grey))
-                    g.DrawString(t.Sub, fSub, b, new RectangleF(r.X + Px(4), r.Y + Px(84), r.Width - Px(8), Px(18)), center);
-                if (t.Clickable && i < 9)
+                    g.DrawString(t.Title, fTitle, b, new RectangleF(r.X + Pu(4), r.Y + Pu(64) + dy, r.Width - Pu(8), Pu(20)), center);
+                if (dy == 0)
+                    using (var b = new SolidBrush(t.On ? Color.FromArgb(0xD0, 0xD0, 0xD0) : grey))
+                        g.DrawString(t.Sub, fSub, b, new RectangleF(r.X + Pu(4), r.Y + Pu(84), r.Width - Pu(8), Pu(18)), center);
+                int num = KeyNumber(i);
+                if (num > 0)
                     using (var b = new SolidBrush(Color.FromArgb(0x5A, 0x5A, 0x5A)))
-                        g.DrawString((i + 1).ToString(), fIndex, b, r.X + Px(7), r.Y + Px(5));
+                        g.DrawString(num.ToString(), fIndex, b, r.X + Pu(7), r.Y + Pu(5));
             }
         }
     }
@@ -532,50 +581,68 @@ namespace HotkeyDeck {
 function New-Tile([string]$id, [string]$glyph, [string]$accent) {
     $t = New-Object HotkeyDeck.Tile
     $t.Id = $id
-    $t.Glyph = [string][char][Convert]::ToInt32($glyph, 16)
+    $t.Glyph = if ($glyph) { [string][char][Convert]::ToInt32($glyph, 16) } else { '' }
     $t.Accent = [System.Drawing.ColorTranslator]::FromHtml("#$accent")
     $t
 }
 
-$deck = New-Object HotkeyDeck.DeckForm
-$DeckTiles = [ordered]@{
-    audio  = New-Tile 'audio'  'E7F6' '4CC2FF'
-    mic    = New-Tile 'mic'    'E720' '3FB950'
-    hdr    = New-Tile 'hdr'    'E706' 'FFC83D'
-    gpu    = New-Tile 'gpu'    'EC4A' 'FF8C42'
-    replay = New-Tile 'replay' 'E7C8' '76B900'
-    black  = New-Tile 'black'  'E708' 'B4A7FF'
-    temps  = New-Tile 'temps'  'E7F6' 'FFFFFF'
+# Une colonne par thème, puis une barre d'état (lecture seule) en bas :
+#
+#     SON          ÉCRAN          JEU
+#   [Casque]     [HDR]          [Overclock GPU]
+#   [Enceintes]  [Écran noir]   [Instant Replay]
+#   ──────────────────────────────────────────
+#    Micro actif    CPU 46°    GPU 27°
+#
+# Les cartes « allumées » (teintées) sont les états actifs. L'ordre des tuiles
+# donne les touches 1-6 (colonne par colonne).
+function Add-Tile([string]$id, [string]$glyph, [string]$accent, [int]$col, [int]$row, [string]$title = '') {
+    $t = New-Tile $id $glyph $accent
+    $t.Col = $col; $t.Row = $row; $t.Title = $title
+    if ($row -lt 0) { $t.Clickable = $false }
+    $DeckTiles[$id] = $t
+    $deck.Tiles.Add($t)
 }
-$DeckTiles.replay.Title = 'Sauver replay'; $DeckTiles.replay.Sub = 'Instant Replay'
-$DeckTiles.black.Title  = 'Écran noir';    $DeckTiles.black.Sub  = 'Échap pour quitter'
-$DeckTiles.temps.Span = 2; $DeckTiles.temps.Clickable = $false
-foreach ($t in $DeckTiles.Values) { $deck.Tiles.Add($t) }
 
+$deck = New-Object HotkeyDeck.DeckForm
+$deck.Headers = [string[]]@('SON', 'ÉCRAN', 'JEU')
+$DeckTiles = [ordered]@{}
+Add-Tile 'casque'    'E7F6' '4CC2FF' 0 0 'Casque'
+Add-Tile 'enceintes' 'E7F5' '4CC2FF' 0 1 'Enceintes'
+Add-Tile 'hdr'       'E706' 'FFC83D' 1 0 'HDR'
+Add-Tile 'black'     'E708' 'B4A7FF' 1 1 'Écran noir'
+Add-Tile 'gpu'       'EC4A' 'FF8C42' 2 0 'Overclock GPU'
+Add-Tile 'replay'    'E7C8' '76B900' 2 1 'Instant Replay'
+# Barre d'état. Le micro est vérifié à chaque appui sur son capteur et à
+# l'ouverture du deck : il n'a pas besoin d'être cliquable
+Add-Tile 'mic'       'E720' '3FB950' 0 -1 'Micro'
+Add-Tile 'cpu'       ''     'FFFFFF' 1 -1 'CPU'
+Add-Tile 'gputemp'   ''     'FFFFFF' 2 -1 'GPU'
+$DeckTiles.black.Sub = 'Échap pour quitter'
+
+# Un bouton par profil : celui qui est actif est allumé, avec son volume
 function Update-DeckAudio {
-    $t = $DeckTiles.audio
-    if ($S.Active -eq 'casque') {
-        $t.Glyph = [string][char]0xE7F6; $t.Title = 'Casque';    $t.Sub = '→ Enceintes'
-    } else {
-        $t.Glyph = [string][char]0xE7F5; $t.Title = 'Enceintes'; $t.Sub = '→ Casque'
+    foreach ($key in 'casque', 'enceintes') {
+        $t = $DeckTiles[$key]
+        $t.On = $S.Active -eq $key
+        $t.Sub = if ($t.On) { "$(Fmt $S.Profiles[$key].Cur) dB" } else { '' }
     }
 }
 
 function Update-DeckMic {
     $t = $DeckTiles.mic
     $m = $S.Mic
-    $t.Sub = 'clic = revérifier'
     if (-not $m.Connected) {
-        $t.Glyph = [string][char]0xF781; $t.Title = 'Micro absent'; $t.On = $false
-        $t.Accent = [System.Drawing.ColorTranslator]::FromHtml('#8B949E'); $t.Sub = 'QuadCast débranché'
+        $t.Glyph = [string][char]0xF781; $t.Value = 'débranché'
+        $t.Accent = [System.Drawing.ColorTranslator]::FromHtml('#8B949E')
     } elseif ($m.State -eq [HotkeyDeck.MicWatcher]::Muted) {
-        $t.Glyph = [string][char]0xF781; $t.Title = 'Micro coupé'; $t.On = $true
+        $t.Glyph = [string][char]0xF781; $t.Value = 'coupé'
         $t.Accent = [System.Drawing.ColorTranslator]::FromHtml('#F85149')
     } elseif ($m.State -eq [HotkeyDeck.MicWatcher]::Active) {
-        $t.Glyph = [string][char]0xE720; $t.Title = 'Micro actif'; $t.On = $false
+        $t.Glyph = [string][char]0xE720; $t.Value = 'actif'
         $t.Accent = [System.Drawing.ColorTranslator]::FromHtml('#3FB950')
     } else {
-        $t.Glyph = [string][char]0xE720; $t.Title = 'Micro ?'; $t.On = $false
+        $t.Glyph = [string][char]0xE720; $t.Value = '?'
         $t.Accent = [System.Drawing.ColorTranslator]::FromHtml('#8B949E')
     }
 }
@@ -583,30 +650,24 @@ function Update-DeckMic {
 function Update-DeckHdr {
     $t = $DeckTiles.hdr
     $h = [HotkeyDeck.HdrControl]::Get()
-    $t.Title = 'HDR'
     $t.On = $h -eq 1
     $t.Clickable = $h -ge 0
-    $t.Sub = switch ($h) { 1 { 'Activé' } 0 { 'Désactivé' } default { 'Non supporté' } }
+    $t.Sub = if ($h -lt 0) { 'Non supporté' } else { '' }
 }
 
 function Update-DeckGpu {
     $t = $DeckTiles.gpu
     $oc = [HotkeyDeck.Sensors]::GpuOverclocked()
     $t.On = $oc -eq 1
-    switch ($oc) {
-        1       { $t.Glyph = [string][char]0xEC4A; $t.Title = 'GPU Overclock'; $t.Sub = '→ Stock' }
-        0       { $t.Glyph = [string][char]0xEC49; $t.Title = 'GPU Stock';     $t.Sub = '→ Overclock' }
-        default { $t.Glyph = [string][char]0xEC49; $t.Title = 'GPU ?';         $t.Sub = 'NVML indisponible' }
-    }
+    $t.Sub = if ($oc -lt 0) { 'NVML indisponible' } else { '' }
 }
 
 function Format-Temp([float]$v) { if ([float]::IsNaN($v)) { '–' } else { '{0:0}°' -f $v } }
 
 function Update-DeckTemps {
-    $t = $DeckTiles.temps
-    $ok = [HotkeyDeck.Sensors]::Read()
-    $t.Stats = @('CPU', (Format-Temp ([HotkeyDeck.Sensors]::Cpu)), 'GPU', (Format-Temp ([HotkeyDeck.Sensors]::Gpu)))
-    $t.Sub = if ($ok) { '' } else { 'Afterburner fermé' }
+    [void][HotkeyDeck.Sensors]::Read()   # « – » si Afterburner est fermé
+    $DeckTiles.cpu.Value     = Format-Temp ([HotkeyDeck.Sensors]::Cpu)
+    $DeckTiles.gputemp.Value = Format-Temp ([HotkeyDeck.Sensors]::Gpu)
 }
 
 # ============================================================
@@ -666,8 +727,13 @@ function Save-Replay {
 
 function Invoke-DeckAction([string]$id) {
     switch ($id) {
-        'audio'  { $deck.HideDeck($true); Switch-Profile $(if ($S.Active -eq 'casque') { 'enceintes' } else { 'casque' }) }
-        'mic'    { $micWatcher.Recheck() }   # le deck reste ouvert, l'état se met à jour
+        { $_ -in 'casque', 'enceintes' } {
+            $deck.HideDeck($true)
+            # Pas de bascule : le profil déjà actif n'est pas réappliqué (ça
+            # remettrait le volume par défaut), on rappelle juste son état
+            if ($S.Active -eq $id) { $p = GetProfile; Show-Osd $p.Label "$(Fmt $p.Cur) dB" 1500 }
+            else { Switch-Profile $id }
+        }
         'hdr'    { $deck.HideDeck($true); Toggle-Hdr }
         'gpu'    { $deck.HideDeck($true); Toggle-GpuProfile }
         'replay' { Save-Replay }
@@ -690,6 +756,8 @@ function Open-Deck {
     $res = $deck.ShowDeck()
     Log "Deck : ouvert $res (préparation $prep ms)"
     $deckTimer.Start()
+    # Revérifie l'état réel du micro ; la tuile suit dès que le résultat arrive
+    if ($S.Mic.Connected) { $micWatcher.Recheck() }
 }
 
 # Noms des combinaisons de variantes (bit 1 = Maj, 2 = Ctrl, 4 = Alt)

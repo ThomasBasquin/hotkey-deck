@@ -17,12 +17,12 @@
 #   Ctrl+Alt+B       → écran noir (Échap ou clic pour fermer)
 #   ²                → deck à l'écran (voir deck.ps1)
 #
-# Micro HyperX QuadCast S : icône dans la zone de notification (verte = actif,
-# rouge barrée = coupé, grise = débranché/inconnu). Le micro n'expose pas son
+# Micro HyperX QuadCast S : état affiché à l'OSD à chaque appui sur son capteur
+# et dans le deck. Le micro n'expose pas son
 # état, mais en capture "raw" (sans les effets Windows type Voice Clarity) il
 # envoie des zéros exacts quand il est coupé, et toujours un souffle de fond
 # quand il est actif. On l'écoute ~0,4 s au démarrage, à chaque appui sur le
-# capteur (rapport HID) et sur clic gauche de l'icône.
+# capteur (rapport HID) et à l'ouverture du deck.
 #
 # Les modèles (templates\*.txt) se mettent à jour tout seuls si tu modifies
 # l'EQ dans Peace : la sync périodique recopie le nouveau peace.txt.
@@ -140,7 +140,7 @@ namespace HotkeyDeck {
             }
         }
 
-        // Clic sur l'icône : revérifier tout de suite
+        // Ouverture du deck : revérifier tout de suite
         public void Recheck() { wake.Set(); }
 
         static string FindHidPath() {
@@ -744,6 +744,12 @@ $osdTimer.add_Tick({ Safe {
     $a = $S.Alpha - 27
     if ($a -le 0) {
         $osdTimer.Stop()
+        # Vide l'OSD avant de le cacher : à l'affichage suivant, Windows peut
+        # remontrer un instant l'ancienne image de la fenêtre (flash de l'état
+        # précédent du micro) ; elle ne contiendra alors plus rien
+        $osd.Opacity = 0
+        $txtLabel.Text = ''; $txtValue.Text = ''; $txtIcon.Text = ''
+        $osd.Refresh()
         $osd.Hide()
         Set-OsdAlpha $OsdAlpha
     } else {
@@ -786,9 +792,15 @@ function Show-Osd([string]$label, [string]$value, [int]$durationMs = 0, [string]
         $txtValue.TextAlign = 'MiddleCenter'
         $txtValue.Bounds    = $ValueBounds
     }
+    # Affichée invisible, dessinée avec le nouveau contenu, puis rendue visible
+    # (voir aussi la fin du fondu, qui vide l'OSD avant de le cacher)
+    if (-not $osd.Visible) {
+        $osd.Opacity = 0
+        $osd.Show()
+        $osd.Refresh()
+    }
     Set-OsdAlpha $OsdAlpha
     $S.OsdHideAt   = [DateTime]::Now.AddMilliseconds($dur)
-    if (-not $osd.Visible) { $osd.Show() }
     $osd.TopMost = $true
     $osdTimer.Start()
 }
@@ -828,55 +840,12 @@ function Hide-BlackScreen {
 # ============================================================
 #  MICRO (HyperX QuadCast S)
 # ============================================================
-function New-MicIcon([string]$hex, [bool]$slash) {
-    $bmp = New-Object System.Drawing.Bitmap 32, 32
-    $g = [System.Drawing.Graphics]::FromImage($bmp)
-    $g.SmoothingMode = 'AntiAlias'
-    $c = [System.Drawing.ColorTranslator]::FromHtml("#$hex")
-    $br = New-Object System.Drawing.SolidBrush $c
-    $pen = New-Object System.Drawing.Pen $c, 2.5
-
-    # Capsule
-    $cap = New-Object System.Drawing.Drawing2D.GraphicsPath
-    $cap.AddArc(11, 2, 10, 10, 180, 180)
-    $cap.AddArc(11, 10, 10, 10, 0, 180)
-    $cap.CloseFigure()
-    $g.FillPath($br, $cap)
-    # Arceau, pied et socle
-    $g.DrawArc($pen, 7, 8, 18, 16, 0, 180)
-    $g.DrawLine($pen, 16, 24, 16, 29)
-    $g.DrawLine($pen, 10, 29, 22, 29)
-    if ($slash) {
-        $g.DrawLine((New-Object System.Drawing.Pen $c, 3.5), 4, 3, 28, 29)
-    }
-    $g.Dispose()
-    [System.Drawing.Icon]::FromHandle($bmp.GetHicon())
-}
-
-$MicIcons = @{
-    On   = New-MicIcon '3FB950' $false
-    Off  = New-MicIcon 'F85149' $true
-    Gone = New-MicIcon '8B949E' $true
-}
-
 $S.Mic = @{ Ver = 0; Tog = 0; State = -1; Connected = $null }
 
-$tray = New-Object System.Windows.Forms.NotifyIcon
-$tray.Icon    = $MicIcons.Gone
-$tray.Text    = 'QuadCast : recherche…'
-$tray.Visible = $true
-
-function Update-MicIcon {
-    $m = $S.Mic
-    if (-not $m.Connected) {
-        $tray.Icon = $MicIcons.Gone; $tray.Text = 'QuadCast : débranché'
-    } elseif ($m.State -eq [HotkeyDeck.MicWatcher]::Muted) {
-        $tray.Icon = $MicIcons.Off;  $tray.Text = 'QuadCast : COUPÉ'
-    } elseif ($m.State -eq [HotkeyDeck.MicWatcher]::Active) {
-        $tray.Icon = $MicIcons.On;   $tray.Text = 'QuadCast : actif'
-    } else {
-        $tray.Icon = $MicIcons.Gone; $tray.Text = 'QuadCast : état inconnu (clic = revérifier)'
-    }
+# État du micro changé : le deck ouvert suit tout de suite (sans attendre son
+# rafraîchissement d'1 s)
+function Update-MicDisplay {
+    if ($deck -and $deck.Visible) { Update-DeckMic; $deck.Invalidate() }
 }
 
 function Show-MicOsd {
@@ -888,9 +857,6 @@ function Show-MicOsd {
 
 $micWatcher = New-Object HotkeyDeck.MicWatcher
 
-# Clic gauche : revérifie l'état réel du micro
-$tray.add_MouseClick({ param($src, $e) if ($e.Button -eq 'Left') { Safe { $micWatcher.Recheck() } } })
-
 function Poll-Mic {
     $m = $S.Mic
     $con = $micWatcher.Connected
@@ -898,7 +864,7 @@ function Poll-Mic {
         $m.Connected = $con
         Log "Micro : QuadCast $(if ($con) { 'détecté' } else { 'débranché' })"
         if (-not $con) { $m.State = -1 }
-        Update-MicIcon
+        Update-MicDisplay
     }
 
     # Appui sur le capteur : on affiche tout de suite l'état inversé,
@@ -909,7 +875,7 @@ function Poll-Mic {
         $m.Tog = $tog
         if ($odd -and $m.State -gt 0) {
             $m.State = 3 - $m.State   # Active (1) <-> Muted (2)
-            Update-MicIcon
+            Update-MicDisplay
             Show-MicOsd
         }
     }
@@ -926,7 +892,7 @@ function Poll-Mic {
             Log "Micro : vérification impossible ($($micWatcher.LastError))"
         }
         if ($m.State -ne $prev) {
-            Update-MicIcon
+            Update-MicDisplay
             # Correction d'un affichage faux (pas au démarrage)
             if ($prev -gt 0 -and $m.State -gt 0) {
                 Log "Micro : état corrigé par la vérification"

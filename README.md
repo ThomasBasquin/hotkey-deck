@@ -3,7 +3,7 @@
 Raccourcis clavier et deck à l'écran pour piloter un PC Windows de jeu, sans se faire repérer par les anti-cheats :
 
 - **Son** : volume (preamp d'[Equalizer APO](https://sourceforge.net/projects/equalizerapo/) / [Peace](https://sourceforge.net/projects/peace-equalizer-apo-extension/)) avec OSD, mute, bascule casque/enceintes
-- **Micro** : état du HyperX QuadCast S (actif / coupé) dans la zone de notification et à l'OSD
+- **Micro** : état du HyperX QuadCast S (actif / coupé) à l'OSD et dans le deck
 - **Écran** : écran noir anti burn-in OLED, bascule du HDR Windows
 - **GPU** : bascule entre les profils MSI Afterburner stock et overclock, températures CPU/GPU
 - **Enregistrement** : sauvegarde de l'Instant Replay NVIDIA
@@ -36,15 +36,25 @@ Tout tient dans un script PowerShell lancé au démarrage. Le projet est né com
 
 Équivalent d'un Stream Deck affiché par-dessus l'écran. La touche **²** l'ouvre au centre de l'écran de la fenêtre active. On clique sur un bouton, ou on tape son numéro (1–6). Échap, ² ou un clic ailleurs le referment, et le focus revient au jeu.
 
+```
+    SON           ÉCRAN          JEU
+  [Casque]      [HDR]          [Overclock GPU]
+  [Enceintes]   [Écran noir]   [Instant Replay]
+  ─────────────────────────────────────────────
+   Micro actif      CPU 46°        GPU 27°
+```
+
+Les boutons sont rangés par thème, numérotés colonne par colonne. Une carte « allumée » (teintée) indique un état actif. La barre du bas est en lecture seule.
+
 | Bouton | Action |
 |--------|--------|
-| Casque / Enceintes | Bascule le profil audio (comme `Ctrl+Alt+F1/F2`) |
-| Micro | État du QuadCast S (actif / coupé / absent) ; clic = revérifier |
+| Casque, Enceintes | Applique ce profil audio (comme `Ctrl+Alt+F1/F2`) ; le profil actif est allumé avec son volume. Recliquer dessus ne le réapplique pas (ça remettrait le volume par défaut) |
 | HDR | Active/désactive le HDR Windows sur les écrans qui le supportent (API DisplayConfig) |
-| GPU Stock / Overclock | Applique le profil Afterburner 1 (stock) ou 2 (OC) via `MSIAfterburner.exe -ProfileN` ; état lu via la limite de puissance (NVML) |
-| Sauver replay | Envoie `Alt+F10` (sauvegarde Instant Replay NVIDIA) |
 | Écran noir | Comme `Ctrl+Alt+B` |
-| CPU / GPU | Températures, lues dans la mémoire partagée d'Afterburner (rafraîchies chaque seconde) |
+| Overclock GPU | Applique le profil Afterburner 2 (OC) ou 1 (stock) via `MSIAfterburner.exe -ProfileN` ; allumé quand l'OC est actif (limite de puissance relevée, lue via NVML) |
+| Instant Replay | Envoie `Alt+F10` (sauvegarde Instant Replay NVIDIA) |
+
+Barre d'état : état du micro (revérifié à chaque ouverture du deck et suivi en direct), températures CPU et GPU lues dans la mémoire partagée d'Afterburner (rafraîchies chaque seconde).
 
 Les numéros de profils Afterburner et le raccourci NVIDIA sont réglables dans `$Deck`, en haut de `deck.ps1`.
 
@@ -79,7 +89,7 @@ Les profils sont définis dans `$S.Profiles`, en haut de `hotkey_deck.ps1` :
 
 ## Micro (HyperX QuadCast S)
 
-Le micro n'expose pas son état de mute. Le script écoute son interface HID, qui signale chaque appui sur le capteur (bascule seulement), puis vérifie l'état réel en capture audio « raw » (sans les effets Windows type Voice Clarity) : coupé = zéros exacts, actif = souffle de fond permanent. Icône verte / rouge barrée / grise dans la zone de notification ; clic gauche = revérifier.
+Le micro n'expose pas son état de mute. Le script écoute son interface HID, qui signale chaque appui sur le capteur (bascule seulement), puis vérifie l'état réel en capture audio « raw » (sans les effets Windows type Voice Clarity) : coupé = zéros exacts, actif = souffle de fond permanent. L'OSD affiche le nouvel état à chaque appui ; le deck le montre dans sa barre d'état et le revérifie à son ouverture.
 
 ## Installation
 
