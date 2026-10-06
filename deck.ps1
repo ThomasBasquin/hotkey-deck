@@ -30,6 +30,9 @@ $DeckCfg = @{
     TempReset    = 64
     TempSustain  = 2
     TempCheckMs  = 5000
+    # Bandeau d'alerte permanent si un ventilateur du GPU dépasse FanMax (%)
+    # pendant TempSustain relevés de suite (ventilateurs fixés à 35 % dans Afterburner)
+    FanMax       = 35
 }
 
 Add-Type -ReferencedAssemblies System.Windows.Forms, System.Drawing, System.Core -TypeDefinition @'
@@ -500,6 +503,8 @@ namespace HotkeyDeck {
         [DllImport("nvml.dll")] static extern int nvmlDeviceGetEnforcedPowerLimit(IntPtr dev, out uint mw);
         [DllImport("nvml.dll")] static extern int nvmlDeviceGetPowerManagementDefaultLimit(IntPtr dev, out uint mw);
         [DllImport("nvml.dll")] static extern int nvmlDeviceGetTemperature(IntPtr dev, int sensor, out uint t);
+        [DllImport("nvml.dll")] static extern int nvmlDeviceGetNumFans(IntPtr dev, out uint n);
+        [DllImport("nvml.dll")] static extern int nvmlDeviceGetFanSpeed_v2(IntPtr dev, uint fan, out uint pct);
 
         public static float Cpu = float.NaN, Gpu = float.NaN;
         static IntPtr gpu = IntPtr.Zero;
@@ -545,6 +550,21 @@ namespace HotkeyDeck {
                 if (nvmlDeviceGetTemperature(gpu, 0, out t) == 0) Gpu = t;
             }
             return ok;
+        }
+
+        // Vitesse (%) du ventilateur le plus rapide du GPU, lue au pilote (NVML) et
+        // non via Afterburner : si Afterburner plante, les ventilateurs repassent
+        // en automatique, et c'est justement ce qu'on veut voir. -1 = inconnu
+        public static int GpuFanMax() {
+            if (!Nvml()) return -1;
+            uint n;
+            if (nvmlDeviceGetNumFans(gpu, out n) != 0 || n == 0) return -1;
+            int max = -1;
+            for (uint i = 0; i < n; i++) {
+                uint p;
+                if (nvmlDeviceGetFanSpeed_v2(gpu, i, out p) == 0) max = Math.Max(max, (int)p);
+            }
+            return max;
         }
 
         // 1 = limite de puissance relevée (profil OC), 0 = défaut (stock), -1 = inconnu
@@ -703,7 +723,6 @@ function Toggle-GpuProfile {
     # Une 2e instance d'Afterburner transmet le profil à celle qui tourne, puis se ferme
     Start-Process $DeckCfg.Afterburner -ArgumentList "-Profile$n"
     Log "Deck : profil Afterburner $n demandé ($(if ($toOc) { 'OC' } else { 'stock' }))"
-    Show-Osd 'GPU' $(if ($toOc) { 'Overclock' } else { 'Stock' }) 1500
     $S.DeckGpuExpect = [int]$toOc
     $DeckTiles.gpu.On = $toOc   # affichage immédiat, confirmé par la vérification
     $deckGpuCheck.Stop(); $deckGpuCheck.Start()
@@ -731,7 +750,7 @@ $deckReplayDone.Interval = 200
 $deckReplayDone.add_Tick({ Safe {
     $deckReplayDone.Stop()
     $deck.HideDeck($true)
-    Show-Osd 'Instant Replay' 'Sauvegarde…' 1500 '202020' ([string][char]0xE7C8)
+    Show-Osd '' 'Sauvegarde' 1500 '202020' ([string][char]0xE7C8)
 }})
 
 function Save-Replay {
@@ -742,12 +761,12 @@ function Save-Replay {
 
 function Invoke-DeckAction([string]$id) {
     switch ($id) {
-        # Son et GPU : le deck reste ouvert, la carte se met à jour sur place
+        # Son et GPU : le deck reste ouvert et sa carte change, sans OSD en
+        # doublon (les OSD d'erreur restent)
         { $_ -in 'casque', 'enceintes' } {
             # Pas de bascule : le profil déjà actif n'est pas réappliqué (ça
-            # remettrait le volume par défaut), on rappelle juste son état
-            if ($S.Active -eq $id) { $p = GetProfile; Show-Osd $p.Label "$(Fmt $p.Cur) dB" 1500 }
-            else { Switch-Profile $id }
+            # remettrait le volume par défaut)
+            if ($S.Active -ne $id) { Switch-Profile $id -Quiet }
             Update-DeckAudio; $deck.Invalidate()
         }
         'gpu'    { Toggle-GpuProfile; $deck.Invalidate() }
@@ -794,9 +813,63 @@ function Check-Temps {
     }
 }
 
+# ============================================================
+#  ALERTE VENTILATEURS GPU (bandeau permanent)
+# ============================================================
+# Bandeau rouge en haut au centre de l'écran principal, distinct de l'OSD du
+# bas (un changement de volume ne le masque pas), transparent aux clics.
+# Reste affiché tant qu'un ventilateur dépasse FanMax.
+$fanBanner = New-Object HotkeyDeck.OsdForm
+$fanBanner.FormBorderStyle = 'None'
+$fanBanner.StartPosition   = 'Manual'
+$fanBanner.ShowInTaskbar   = $false
+$fanBanner.TopMost         = $true
+$fanBanner.BackColor       = [System.Drawing.ColorTranslator]::FromHtml('#8B1A1A')
+$fanBanner.Opacity         = 0.95
+$fanBanner.ClientSize      = New-Object System.Drawing.Size((Px 320), (Px 44))
+$scr = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+$fanBanner.Location = New-Object System.Drawing.Point(
+    [int]($scr.X + [Math]::Floor(($scr.Width - $fanBanner.Width) / 2)), [int]($scr.Y + (Px 24)))
+$fanText = New-Object System.Windows.Forms.Label
+$fanText.AutoSize  = $false
+$fanText.Dock      = 'Fill'
+$fanText.TextAlign = 'MiddleCenter'
+$fanText.Font      = New-Object System.Drawing.Font('Segoe UI Semibold', 12)
+$fanText.ForeColor = [System.Drawing.Color]::White
+$fanBanner.Controls.Add($fanText)
+$fanBanner.add_HandleCreated({
+    $v = 2
+    [HotkeyDeck.Native]::DwmSetWindowAttribute($fanBanner.Handle, 33, [ref]$v, 4) | Out-Null
+})
+$S.FanWatch = @{ Above = 0; Shown = $false }
+
+function Check-Fans {
+    $pct = [HotkeyDeck.Sensors]::GpuFanMax()
+    if ($pct -lt 0) { return }
+    $w = $S.FanWatch
+    if ($pct -gt $DeckCfg.FanMax) {
+        $w.Above++
+        if ($w.Above -lt $DeckCfg.TempSustain) { return }
+        $fanText.Text = "⚠  Ventilateurs GPU à $pct %"
+        if (-not $w.Shown) {
+            $w.Shown = $true
+            Log "Ventilateurs GPU : $pct % (> $($DeckCfg.FanMax) %), bandeau affiché"
+            $fanBanner.Show()
+        }
+        $fanBanner.TopMost = $true
+    } else {
+        $w.Above = 0
+        if ($w.Shown) {
+            $w.Shown = $false
+            Log "Ventilateurs GPU : revenus à $pct %, bandeau retiré"
+            $fanBanner.Hide()
+        }
+    }
+}
+
 $tempTimer = New-Object System.Windows.Forms.Timer
 $tempTimer.Interval = $DeckCfg.TempCheckMs
-$tempTimer.add_Tick({ Safe { Check-Temps } })
+$tempTimer.add_Tick({ Safe { Check-Temps }; Safe { Check-Fans } })
 $tempTimer.Start()
 
 # ============================================================

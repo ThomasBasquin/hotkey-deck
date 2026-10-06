@@ -60,6 +60,8 @@ Les numéros de profils Afterburner, le raccourci NVIDIA et les seuils de l'aler
 
 **Alerte température** : l'OSD prévient quand le CPU ou le GPU reste au-dessus de 67 °C pendant deux relevés de suite (relevé toutes les 5 s, donc ~10 s : les pics brefs sont ignorés). Une seule alerte par dépassement, réarmée une fois redescendu sous 64 °C (en jeu, The Finals en 4K : ~58 °C CPU et ~60 °C GPU, max 63 °C).
 
+**Alerte ventilateurs GPU** : bandeau rouge permanent en haut au centre de l'écran (« ⚠ Ventilateurs GPU à 52 % »), transparent aux clics, tant qu'un ventilateur dépasse 35 % pendant au moins deux relevés (ils sont fixés à 35 % dans Afterburner). La vitesse est lue au pilote (NVML) et non via Afterburner, pour détecter aussi le cas où Afterburner plante et que les ventilateurs repassent en automatique. Seuil réglable via `FanMax` dans `$DeckCfg`.
+
 **Plein écran** : le deck s'affiche par-dessus les jeux en plein écran fenêtré / sans bordure (cas de la plupart des jeux DX12 / DX11 récents). Aucun programme externe ne peut s'afficher par-dessus un jeu en plein écran **exclusif** sans s'injecter dans son rendu (ce que font seulement les overlays autorisés par les anti-cheats : Steam, Discord, NVIDIA). Dans ce cas, le deck s'ouvre sur l'autre écran.
 
 ## Compatibilité anti-cheat

@@ -585,7 +585,9 @@ function Get-EqSignature([string[]]$lines) {
 # ============================================================
 #  SWITCH DE PROFIL
 # ============================================================
-function Switch-Profile([string]$key) {
+# -Quiet : pas d'OSD de confirmation (appel depuis le deck, dont la carte change
+# déjà) ; les OSD d'erreur restent
+function Switch-Profile([string]$key, [switch]$Quiet) {
     $p = $S.Profiles[$key]
     Log "$($p.Label) demandé"
 
@@ -634,7 +636,7 @@ function Switch-Profile([string]$key) {
     $check = (Read-PeaceLines) -join "`n"
     if ($check.Contains($guid)) {
         Log "✓ Switch $($p.Label) appliqué ($guid), Preamp=$(Fmt $p.Cur) dB"
-        Show-Osd $p.Label "$(Fmt $p.Cur) dB" 2500
+        if (-not $Quiet) { Show-Osd $p.Label "$(Fmt $p.Cur) dB" 2500 }
     } else {
         Log "⚠ Switch $($p.Label) : relecture de peace.txt incohérente"
         Show-Osd "⚠ $($p.Label)" 'Non confirmé' 3000 '804000'
@@ -765,32 +767,46 @@ function Show-Osd([string]$label, [string]$value, [int]$durationMs = 0, [string]
     $txtLabel.ForeColor = [System.Drawing.ColorTranslator]::FromHtml($(if ($bgColor -eq '801010') { '#FFCCCC' } else { '#AAAAAA' }))
     $txtLabel.Text = $label
     $txtValue.Text = $value
+    # Sans titre, la ligne de valeur est centrée verticalement
+    $vb = $ValueBounds
+    if (-not $label) { $vb.Y = [int](($osd.ClientSize.Height - $vb.Height) / 2) }
     if ($glyph -and -not $value) {
         # Icône seule, centrée à la place de la valeur
         $txtIcon.Font      = $IconFontBig
         $txtIcon.Text      = $glyph
         $txtIcon.BackColor = $osd.BackColor
-        $txtIcon.Bounds    = $ValueBounds
+        $txtIcon.Bounds    = $vb
         $txtIcon.Visible   = $true
         $txtValue.Visible  = $false
     } elseif ($glyph) {
         # Icône + texte centrés ensemble sur la ligne de la valeur
         $txtIcon.Font = $IconFont
         $txtValue.Visible = $true
-        $tw  = [System.Windows.Forms.TextRenderer]::MeasureText($value, $txtValue.Font).Width
-        $iw  = Px 32; $gap = Px 6
+        # Largeurs réelles : mesurées sans marges et avec le contexte d'affichage
+        # du label (sans lui, la mesure ne suit pas la mise à l'échelle de
+        # l'écran et le groupe est décalé d'une dizaine de px vers la gauche)
+        $np  = [System.Windows.Forms.TextFormatFlags]::NoPadding
+        $big = New-Object System.Drawing.Size(1000, 1000)
+        $gr  = $txtValue.CreateGraphics()
+        try {
+            $tw = [System.Windows.Forms.TextRenderer]::MeasureText($gr, $value, $txtValue.Font, $big, $np).Width
+            $iw = [System.Windows.Forms.TextRenderer]::MeasureText($gr, $glyph, $IconFont, $big, $np).Width
+        } finally { $gr.Dispose() }
+        $gap = Px 8
         $x   = [int](($osd.ClientSize.Width - ($iw + $gap + $tw)) / 2)
         $txtIcon.Text      = $glyph
         $txtIcon.BackColor = $osd.BackColor
-        $txtIcon.Bounds    = New-Object System.Drawing.Rectangle($x, $ValueBounds.Y, $iw, $ValueBounds.Height)
+        # Boîte de l'icône un peu plus large que le glyphe (centré dedans) pour
+        # ne pas le rogner
+        $txtIcon.Bounds    = New-Object System.Drawing.Rectangle(($x - (Px 6)), $vb.Y, ($iw + (Px 12)), $vb.Height)
         $txtValue.TextAlign = 'MiddleLeft'
-        $txtValue.Bounds    = New-Object System.Drawing.Rectangle(($x + $iw + $gap), $ValueBounds.Y, ($tw + (Px 4)), $ValueBounds.Height)
+        $txtValue.Bounds    = New-Object System.Drawing.Rectangle(($x + $iw + $gap), $vb.Y, ($tw + (Px 4)), $vb.Height)
         $txtIcon.Visible   = $true
     } else {
         $txtIcon.Visible    = $false
         $txtValue.Visible   = $true
         $txtValue.TextAlign = 'MiddleCenter'
-        $txtValue.Bounds    = $ValueBounds
+        $txtValue.Bounds    = $vb
     }
     # Affichée invisible, dessinée avec le nouveau contenu, puis rendue visible
     # (voir aussi la fin du fondu, qui vide l'OSD avant de le cacher)
