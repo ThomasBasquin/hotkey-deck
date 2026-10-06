@@ -987,8 +987,10 @@ function Toggle-Mute {
 }
 
 function On-Hotkey([int]$id) {
-    # 11..73 = variantes Maj/Ctrl/Alt de F13-F15 (id de base + 10 x combinaison)
-    if ($id -gt 10 -and $id -lt 100) { $id = $id % 10 }
+    # 11..77 = variantes Maj/Ctrl/Alt de F13-F15 et ² (id de base + 10 x combinaison)
+    $mods = 0
+    if ($id -gt 10 -and $id -lt 100) { $mods = [Math]::Floor($id / 10); $id = $id % 10 }
+    if ($id -eq 7) { Toggle-Deck $mods; return }
     switch ($id) {
         1   { Volume-Down }
         2   { Volume-Up }
@@ -996,7 +998,6 @@ function On-Hotkey([int]$id) {
         4   { Switch-Profile 'enceintes' }
         5   { Switch-Profile 'casque' }
         6   { if ($S.Black.Count) { Hide-BlackScreen } else { Show-BlackScreen } }
-        7   { Toggle-Deck }
         100 { Hide-BlackScreen }
     }
 }

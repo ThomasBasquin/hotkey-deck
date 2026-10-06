@@ -49,6 +49,8 @@ namespace HotkeyDeck {
         [DllImport("user32.dll")] static extern bool BringWindowToTop(IntPtr h);
         [DllImport("user32.dll")] static extern bool IsWindow(IntPtr h);
         [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, IntPtr pid);
+        [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+        [DllImport("user32.dll")] static extern short GetAsyncKeyState(int vk);
         [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
         [DllImport("user32.dll")] static extern bool AttachThreadInput(uint a, uint b, bool attach);
         [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint f);
@@ -62,7 +64,11 @@ namespace HotkeyDeck {
         public List<Tile> Tiles = new List<Tile>();
         public int Columns = 4;
         public event Action<string> TileClicked;
+        public event Action<string> Info;   // historique (journal) : fermetures, focus perdu
         public bool Exclusive;        // plein écran exclusif détecté au dernier affichage
+        int shownAt;
+        int regrabs;   // reprises du focus depuis l'ouverture
+        string fgMethod = "";
 
         readonly List<Rectangle> rects = new List<Rectangle>();
         readonly Timer fade = new Timer { Interval = 15 };
@@ -104,7 +110,37 @@ namespace HotkeyDeck {
             // Taille et polices sont calculées pour l'écran cible : on ignore le
             // redimensionnement automatique au passage sur un écran d'autre DPI
             if (m.Msg == 0x02E0 /* WM_DPICHANGED */) { m.Result = IntPtr.Zero; return; }
+            // WM_ACTIVATE directement : l'événement Deactivate de WinForms ne se
+            // déclenche pas quand le premier plan a été pris via AttachThreadInput
+            if (m.Msg == 0x0006 /* WM_ACTIVATE */ && Visible && (m.WParam.ToInt64() & 0xFFFF) == 0 /* WA_INACTIVE */)
+                BeginInvoke(new Action(() => OnFocusLost(true)));
             base.WndProc(ref m);
+        }
+
+        // Filet de sécurité appelé chaque seconde : le clic est déjà relâché à ce
+        // moment-là, donc on ne reprend jamais le focus d'ici (il pourrait s'agir
+        // d'un clic voulu ailleurs) ; seuls Alt / Windows encore enfoncés ferment
+        public void FocusLost() { OnFocusLost(false); }
+
+        static bool Down(int vk) { return (GetAsyncKeyState(vk) & 0x8000) != 0; }
+
+        // Le deck n'a plus le premier plan (WM_ACTIVATE, reçu au moment même) :
+        //  - changement voulu (clic hors du deck, Alt+Tab, touche Windows) : on ferme
+        //  - fenêtre qui reprend le focus d'elle-même (constaté avec Chrome, et
+        //    possible avec un jeu) : on reste affiché et on le reprend, au plus
+        //    3 fois par ouverture pour ne pas se battre avec elle
+        void OnFocusLost(bool live) {
+            if (!Visible || HasFocus) return;
+            string who = DescribeForeground();
+            bool click = (Down(0x01) || Down(0x02) || Down(0x04)) && !Bounds.Contains(Cursor.Position);
+            if (click || Down(0x12 /* Alt */) || Down(0x5B) || Down(0x5C) /* Windows */) {
+                HideDeck(false, "changement de fenêtre → " + who);   // on laisse le focus à cette fenêtre
+                return;
+            }
+            if (!live || regrabs >= 3) return;
+            regrabs++;
+            ForceForeground();
+            Say("focus pris par " + who + " sans action de ta part, repris (" + regrabs + "/3, " + fgMethod + (HasFocus ? "" : ", ÉCHEC") + ")");
         }
 
         int Px(double v) { return (int)Math.Round(v * scale); }
@@ -144,7 +180,21 @@ namespace HotkeyDeck {
                             Px(2 * PAD + rows * TILE + (rows - 1) * GAP));
         }
 
-        public void ShowDeck() {
+        // Processus d'une fenêtre, pour le journal (pas le titre : il peut
+        // contenir des données personnelles, ex. une recherche web)
+        public static string Describe(IntPtr h) {
+            if (h == IntPtr.Zero) return "(aucune)";
+            uint pid;
+            GetWindowThreadProcessId(h, out pid);
+            try { return System.Diagnostics.Process.GetProcessById((int)pid).ProcessName; } catch { return "?"; }
+        }
+        public static string DescribeForeground() { return Describe(GetForegroundWindow()); }
+        public bool HasFocus { get { return GetForegroundWindow() == Handle; } }
+
+        void Say(string m) { var h = Info; if (h != null) h(m); }
+
+        // Renvoie le résultat de l'ouverture pour le journal
+        public string ShowDeck() {
             prevFg = GetForegroundWindow();
             if (prevFg == Handle) prevFg = IntPtr.Zero;
             var scr = PickScreen(prevFg).Bounds;
@@ -159,15 +209,28 @@ namespace HotkeyDeck {
             if (!Visible) Show();
             SetWindowPos(Handle, new IntPtr(-1), scr.X + (scr.Width - sz.Width) / 2, scr.Y + (scr.Height - sz.Height) / 2,
                          sz.Width, sz.Height, 0x0040 /* SWP_SHOWWINDOW */);
+            shownAt = Environment.TickCount;
+            regrabs = 0;
             ForceForeground();
             Invalidate();
             fade.Start();
+            return (GetForegroundWindow() == Handle ? "au premier plan (" + fgMethod + ")" : "SANS le premier plan (actif : " + DescribeForeground() + ")")
+                 + (Exclusive ? ", plein écran exclusif → autre écran" : "")
+                 + ", " + scr.Width + "x" + scr.Height + " à " + (int)(scale * 100) + " %";
         }
 
         // Windows refuse le premier plan à une appli en arrière-plan : on
         // s'attache brièvement à la file d'entrée de la fenêtre active. Il faut
         // le focus pour que le jeu libère et réaffiche le curseur.
         void ForceForeground() {
+            // Après un vrai appui sur le raccourci (WM_HOTKEY), Windows nous
+            // autorise déjà le premier plan : l'appel simple suffit. L'attache
+            // d'entrée laisse sinon l'activation dans un état incohérent (la
+            // fenêtre précédente reprend la main ~1 s plus tard, sans
+            // WM_ACTIVATE pour le deck) : on ne s'en sert qu'en secours.
+            BringWindowToTop(Handle);
+            if (SetForegroundWindow(Handle) && GetForegroundWindow() == Handle) { Activate(); fgMethod = "direct"; return; }
+            fgMethod = "secours";
             IntPtr fg = GetForegroundWindow();
             uint ft = fg != IntPtr.Zero ? GetWindowThreadProcessId(fg, IntPtr.Zero) : 0, me = GetCurrentThreadId();
             bool att = ft != 0 && ft != me && AttachThreadInput(me, ft, true);
@@ -181,20 +244,17 @@ namespace HotkeyDeck {
         }
 
         // restore : rend le focus à la fenêtre d'avant (le jeu)
-        public void HideDeck(bool restore) {
+        public void HideDeck(bool restore) { HideDeck(restore, "action"); }
+        public void HideDeck(bool restore, string reason) {
             if (!Visible) return;
             fade.Stop();
             Hide();
+            Say("fermé (" + reason + ") après " + (Environment.TickCount - shownAt) + " ms");
             if (restore && prevFg != IntPtr.Zero && IsWindow(prevFg)) SetForegroundWindow(prevFg);
         }
 
-        protected override void OnDeactivate(EventArgs e) {
-            base.OnDeactivate(e);
-            HideDeck(false);   // clic sur une autre fenêtre : on lui laisse le focus
-        }
-
         protected override void OnKeyDown(KeyEventArgs e) {
-            if (e.KeyCode == Keys.Escape) { HideDeck(true); return; }
+            if (e.KeyCode == Keys.Escape) { HideDeck(true, "Échap"); return; }
             int n = -1;
             if (e.KeyCode >= Keys.D1 && e.KeyCode <= Keys.D9) n = e.KeyCode - Keys.D1;
             else if (e.KeyCode >= Keys.NumPad1 && e.KeyCode <= Keys.NumPad9) n = e.KeyCode - Keys.NumPad1;
@@ -619,15 +679,31 @@ function Invoke-DeckAction([string]$id) {
 #  OUVERTURE / RAFRAÎCHISSEMENT
 # ============================================================
 function Open-Deck {
-    if ($S.Black.Count) { return }   # pas par-dessus l'écran noir
-    Update-DeckAudio; Update-DeckMic; Update-DeckHdr; Update-DeckGpu; Update-DeckTemps
-    $deck.ShowDeck()
-    if ($deck.Exclusive) { Log 'Deck : plein écran exclusif détecté, affiché sur un autre écran' }
+    if ($S.Black.Count) { Log 'Deck : ignoré, écran noir affiché'; return }   # pas par-dessus l'écran noir
+    $sw = [Diagnostics.Stopwatch]::StartNew()
+    # Une tuile qui échoue ne doit pas empêcher le deck de s'ouvrir
+    foreach ($u in 'Update-DeckAudio', 'Update-DeckMic', 'Update-DeckHdr', 'Update-DeckGpu', 'Update-DeckTemps') {
+        try { & $u } catch { Log "Deck : $u en erreur : $($_.Exception.Message)" }
+    }
+    $prep = $sw.ElapsedMilliseconds
+    $S.DeckNoFocus = $false
+    $res = $deck.ShowDeck()
+    Log "Deck : ouvert $res (préparation $prep ms)"
     $deckTimer.Start()
 }
 
-function Toggle-Deck {
-    if ($deck.Visible) { $deck.HideDeck($true) } else { Open-Deck }
+# Noms des combinaisons de variantes (bit 1 = Maj, 2 = Ctrl, 4 = Alt)
+function Format-Mods([int]$m) {
+    $n = @()
+    if ($m -band 1) { $n += 'Maj' }
+    if ($m -band 2) { $n += 'Ctrl' }
+    if ($m -band 4) { $n += 'Alt' }
+    if ($n) { ($n -join '+') + '+' } else { '' }
+}
+
+function Toggle-Deck([int]$mods = 0) {
+    Log "Deck : touche $(Format-Mods $mods)² (fenêtre active : $([HotkeyDeck.DeckForm]::DescribeForeground()))"
+    if ($deck.Visible) { $deck.HideDeck($true, 'touche ²') } else { Open-Deck }
 }
 
 # Températures et micro rafraîchis tant que le deck est ouvert
@@ -635,13 +711,33 @@ $deckTimer = New-Object System.Windows.Forms.Timer
 $deckTimer.Interval = 1000
 $deckTimer.add_Tick({ Safe {
     if (-not $deck.Visible) { $deckTimer.Stop(); return }
+    if (-not $deck.HasFocus) {
+        $deck.FocusLost()   # ferme si Alt/Windows encore enfoncé (changement de fenêtre voulu)
+        if (-not $deck.Visible) { $deckTimer.Stop(); return }
+        # Affiché sans le focus : le jeu garde la souris, ² ferme le deck (diagnostic)
+        if (-not $S.DeckNoFocus) { Log "Deck : affiché sans le focus (actif : $([HotkeyDeck.DeckForm]::DescribeForeground()))" }
+        $S.DeckNoFocus = $true
+    } else { $S.DeckNoFocus = $false }
     Update-DeckMic; Update-DeckTemps
     $deck.Invalidate()
 }})
 
 $deck.add_TileClicked({ param($id) Safe { Invoke-DeckAction $id } })
 
+$deck.add_Info({ param($m) Safe { Log "Deck : $m" } })
+
 # Touche ² (VK_OEM_7 en AZERTY), sans répétition : Windows la consomme (elle ne
-# tape plus de ²) et WM_HOTKEY autorise le deck à passer au premier plan
+# tape plus de ²) et WM_HOTKEY autorise le deck à passer au premier plan.
+# RegisterHotKey exige les modificateurs exacts : on réserve aussi les variantes
+# Maj/Ctrl/Alt (ids 17..77), sinon ² ne répond pas en jeu pendant un sprint (Maj)
+# ou accroupi (Ctrl).
 $err = $S.Hk.Register(7, $MOD_NOREPEAT, 0xDE)
 if ($err) { Log "Deck : touche ² non réservée (err $err), deck inaccessible" }
+foreach ($m in 1..7) {
+    $mod = $MOD_NOREPEAT
+    if ($m -band 1) { $mod = $mod -bor $MOD_SHIFT }
+    if ($m -band 2) { $mod = $mod -bor $MOD_CONTROL }
+    if ($m -band 4) { $mod = $mod -bor $MOD_ALT }
+    $err = $S.Hk.Register(7 + 10 * $m, $mod, 0xDE)
+    if ($err) { Log "Deck : variante $(Format-Mods $m)² non réservée (err $err)" }
+}
