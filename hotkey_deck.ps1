@@ -108,7 +108,11 @@ namespace HotkeyDeck {
     //    chaque appui sur le capteur de mute (bascule, sans l'état)
     //  - un second thread écoute alors le micro ~0,4 s en capture "raw"
     //    (sans les effets Windows) : coupé = zéros exacts, actif = souffle
-    // Le script relit State/Version depuis un timer (pas d'appel inter-thread).
+    // Les threads ne touchent jamais l'interface : à chaque changement, ils
+    // signalent Changed, qui est exécuté sur le thread de l'interface (celui
+    // qui appelle Start) ; le script y relit State/Version/Toggles/Connected.
+    // PowerShell plante si un autre thread exécute son code : le signal doit
+    // donc passer par le SynchronizationContext de WinForms.
     public class MicWatcher {
         [DllImport("cfgmgr32.dll", CharSet = CharSet.Unicode)]
         static extern int CM_Get_Device_Interface_List_Size(out int len, ref Guid g, string devId, int flags);
@@ -132,7 +136,27 @@ namespace HotkeyDeck {
 
         readonly AutoResetEvent wake = new AutoResetEvent(false);
 
+        // Déclenché sur le thread de l'interface ; plusieurs changements
+        // rapprochés n'en donnent qu'un (le script relit l'état complet)
+        public event Action Changed;
+        SynchronizationContext ui;
+        int pending;
+
+        void Notify() {
+            if (Interlocked.Exchange(ref pending, 1) == 1) return;   // déjà en file
+            ui.Post(_ => {
+                // Remis à 0 avant l'appel : un changement pendant le traitement
+                // en redemande un autre
+                Interlocked.Exchange(ref pending, 0);
+                var h = Changed;
+                if (h != null) h();
+            }, null);
+        }
+
+        // À appeler depuis le thread de l'interface (avant ou pendant Application.Run)
         public void Start() {
+            ui = SynchronizationContext.Current as WindowsFormsSynchronizationContext;
+            if (ui == null) ui = new WindowsFormsSynchronizationContext();
             foreach (ThreadStart f in new ThreadStart[] { HidLoop, CheckLoop }) {
                 var t = new Thread(f);
                 t.IsBackground = true;
@@ -161,6 +185,7 @@ namespace HotkeyDeck {
                         var h = CreateFile(path, 0x80000000 /* GENERIC_READ */, 3, IntPtr.Zero, 3, 0, IntPtr.Zero);
                         if (!h.IsInvalid) {
                             Connected = true;
+                            Notify();
                             wake.Set();
                             try {
                                 using (var fs = new FileStream(h, FileAccess.Read, 1, false)) {
@@ -168,11 +193,12 @@ namespace HotkeyDeck {
                                     while (true) {
                                         int n = fs.Read(b, 0, b.Length);
                                         if (n <= 0) break;
-                                        if (n >= 2 && b[0] == 1 && (b[1] & 0x80) != 0) { Toggles++; wake.Set(); }
+                                        if (n >= 2 && b[0] == 1 && (b[1] & 0x80) != 0) { Toggles++; Notify(); wake.Set(); }
                                     }
                                 }
                             } catch { }   // micro débranché
                             Connected = false;
+                            Notify();
                             wake.Set();
                         }
                     }
@@ -195,6 +221,7 @@ namespace HotkeyDeck {
                 State = s;
                 CheckedToggles = t;
                 Version++;
+                Notify();
             }
         }
 
@@ -1052,11 +1079,10 @@ $syncTimer.Interval = 5000
 $syncTimer.add_Tick({ Safe { Sync-Peace } })
 $syncTimer.Start()
 
+# Relit l'état du micro à chaque changement signalé (aucune vérification
+# périodique) ; Start depuis ce thread, celui de l'interface
+$micWatcher.add_Changed({ Safe { Poll-Mic } })
 $micWatcher.Start()
-$micTimer = New-Object System.Windows.Forms.Timer
-$micTimer.Interval = 50
-$micTimer.add_Tick({ Safe { Poll-Mic } })
-$micTimer.Start()
 
 # Deck à l'écran (touche ²)
 . (Join-Path $PSScriptRoot 'deck.ps1')
