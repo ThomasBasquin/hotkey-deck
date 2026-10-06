@@ -696,14 +696,17 @@ function Toggle-GpuProfile {
         Show-Osd '⚠ GPU' 'Afterburner absent' 2500 '801010'
         return
     }
-    $toOc = [HotkeyDeck.Sensors]::GpuOverclocked() -ne 1
+    # Pendant la confirmation d'un changement en cours, la limite de puissance
+    # n'a peut-être pas encore suivi : on part de l'état demandé
+    $toOc = if ($deckGpuCheck.Enabled) { -not $S.DeckGpuExpect } else { [HotkeyDeck.Sensors]::GpuOverclocked() -ne 1 }
     $n = if ($toOc) { $DeckCfg.ProfileOC } else { $DeckCfg.ProfileStock }
     # Une 2e instance d'Afterburner transmet le profil à celle qui tourne, puis se ferme
     Start-Process $DeckCfg.Afterburner -ArgumentList "-Profile$n"
     Log "Deck : profil Afterburner $n demandé ($(if ($toOc) { 'OC' } else { 'stock' }))"
     Show-Osd 'GPU' $(if ($toOc) { 'Overclock' } else { 'Stock' }) 1500
     $S.DeckGpuExpect = [int]$toOc
-    $deckGpuCheck.Start()
+    $DeckTiles.gpu.On = $toOc   # affichage immédiat, confirmé par la vérification
+    $deckGpuCheck.Stop(); $deckGpuCheck.Start()
 }
 
 # Vérifie quelques secondes plus tard que la limite de puissance a suivi
@@ -716,6 +719,9 @@ $deckGpuCheck.add_Tick({ Safe {
         Log "Deck : le profil Afterburner ne s'est pas appliqué (limite de puissance inchangée)"
         Show-Osd '⚠ GPU' 'Profil non appliqué' 3000 '801010'
     }
+    # Carte du deck : état réel
+    Update-DeckGpu
+    if ($deck.Visible) { $deck.Invalidate() }
 }})
 
 # Instant Replay NVIDIA : Alt+F10 envoyé pendant que le deck a le focus (le jeu
@@ -736,15 +742,16 @@ function Save-Replay {
 
 function Invoke-DeckAction([string]$id) {
     switch ($id) {
+        # Son et GPU : le deck reste ouvert, la carte se met à jour sur place
         { $_ -in 'casque', 'enceintes' } {
-            $deck.HideDeck($true)
             # Pas de bascule : le profil déjà actif n'est pas réappliqué (ça
             # remettrait le volume par défaut), on rappelle juste son état
             if ($S.Active -eq $id) { $p = GetProfile; Show-Osd $p.Label "$(Fmt $p.Cur) dB" 1500 }
             else { Switch-Profile $id }
+            Update-DeckAudio; $deck.Invalidate()
         }
+        'gpu'    { Toggle-GpuProfile; $deck.Invalidate() }
         'hdr'    { $deck.HideDeck($true); Toggle-Hdr }
-        'gpu'    { $deck.HideDeck($true); Toggle-GpuProfile }
         'replay' { Save-Replay }
         'black'  { $deck.HideDeck($false); Show-BlackScreen }
     }

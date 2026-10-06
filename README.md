@@ -44,7 +44,7 @@ Tout tient dans un script PowerShell lancé au démarrage. Le projet est né com
    Micro actif      CPU 46°        GPU 27°
 ```
 
-Les boutons sont rangés par thème, numérotés colonne par colonne. Une carte « allumée » (teintée) indique un état actif. La barre du bas est en lecture seule.
+Les boutons sont rangés par thème, numérotés colonne par colonne. Une carte « allumée » (teintée) indique un état actif. La barre du bas est en lecture seule. Casque, Enceintes et Overclock GPU laissent le deck ouvert (la carte se met à jour) ; les autres boutons le referment.
 
 | Bouton | Action |
 |--------|--------|
