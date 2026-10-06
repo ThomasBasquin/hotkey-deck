@@ -16,11 +16,20 @@
 # courant). Un jeu en plein écran exclusif ne laisse rien s'afficher
 # par-dessus : le deck s'ouvre alors sur l'autre écran.
 
-$Deck = @{
+# (PowerShell ignore la casse des variables : ne pas nommer ceci $Deck, ce
+# serait la même variable que la fenêtre $deck, qui l'écraserait)
+$DeckCfg = @{
     Afterburner  = 'C:\Program Files (x86)\MSI Afterburner\MSIAfterburner.exe'
     ProfileStock = 1     # profils Afterburner (Profile1.cfg / Profile2.cfg)
     ProfileOC    = 2
     ReplayKeys   = @(0xA4, 0x79)   # Alt gauche + F10 (sauvegarde Instant Replay)
+    # Alerte OSD si le CPU ou le GPU reste au-dessus de TempAlert (°C) pendant
+    # TempSustain relevés de suite (un toutes les TempCheckMs) ; nouvelle
+    # alerte seulement après être redescendu sous TempReset
+    TempAlert    = 67
+    TempReset    = 64
+    TempSustain  = 2
+    TempCheckMs  = 5000
 }
 
 Add-Type -ReferencedAssemblies System.Windows.Forms, System.Drawing, System.Core -TypeDefinition @'
@@ -682,15 +691,15 @@ function Toggle-Hdr {
 }
 
 function Toggle-GpuProfile {
-    if (-not (Test-Path $Deck.Afterburner)) {
-        Log "Deck : Afterburner introuvable ($($Deck.Afterburner))"
+    if (-not (Test-Path $DeckCfg.Afterburner)) {
+        Log "Deck : Afterburner introuvable ($($DeckCfg.Afterburner))"
         Show-Osd '⚠ GPU' 'Afterburner absent' 2500 '801010'
         return
     }
     $toOc = [HotkeyDeck.Sensors]::GpuOverclocked() -ne 1
-    $n = if ($toOc) { $Deck.ProfileOC } else { $Deck.ProfileStock }
+    $n = if ($toOc) { $DeckCfg.ProfileOC } else { $DeckCfg.ProfileStock }
     # Une 2e instance d'Afterburner transmet le profil à celle qui tourne, puis se ferme
-    Start-Process $Deck.Afterburner -ArgumentList "-Profile$n"
+    Start-Process $DeckCfg.Afterburner -ArgumentList "-Profile$n"
     Log "Deck : profil Afterburner $n demandé ($(if ($toOc) { 'OC' } else { 'stock' }))"
     Show-Osd 'GPU' $(if ($toOc) { 'Overclock' } else { 'Stock' }) 1500
     $S.DeckGpuExpect = [int]$toOc
@@ -720,7 +729,7 @@ $deckReplayDone.add_Tick({ Safe {
 }})
 
 function Save-Replay {
-    if (-not [HotkeyDeck.KeySender]::Chord([int[]]$Deck.ReplayKeys)) { Log 'Deck : SendInput Alt+F10 refusé' }
+    if (-not [HotkeyDeck.KeySender]::Chord([int[]]$DeckCfg.ReplayKeys)) { Log 'Deck : SendInput Alt+F10 refusé' }
     else { Log 'Deck : Alt+F10 envoyé (Instant Replay)' }
     $deckReplayDone.Start()
 }
@@ -740,6 +749,48 @@ function Invoke-DeckAction([string]$id) {
         'black'  { $deck.HideDeck($false); Show-BlackScreen }
     }
 }
+
+# ============================================================
+#  ALERTE TEMPÉRATURE
+# ============================================================
+# Hausse soutenue (pas un pic d'une seconde) : une alerte par dépassement,
+# réarmée une fois redescendu sous le seuil de réarmement
+$S.TempWatch = @{
+    CPU = @{ Above = 0; Alerted = $false }
+    GPU = @{ Above = 0; Alerted = $false }
+}
+
+function Check-Temps {
+    [void][HotkeyDeck.Sensors]::Read()
+    $vals = @{ CPU = [HotkeyDeck.Sensors]::Cpu; GPU = [HotkeyDeck.Sensors]::Gpu }
+    $new = $false
+    foreach ($k in 'CPU', 'GPU') {
+        $v = $vals[$k]; $w = $S.TempWatch[$k]
+        if ([float]::IsNaN($v)) { continue }
+        if ($v -ge $DeckCfg.TempAlert) {
+            $w.Above++
+            if ($w.Above -ge $DeckCfg.TempSustain -and -not $w.Alerted) { $w.Alerted = $true; $new = $true }
+        } else {
+            $w.Above = 0
+            if ($w.Alerted -and $v -lt $DeckCfg.TempReset) {
+                $w.Alerted = $false
+                Log ("Température : {0} revenu à {1:0}°" -f $k, $v)
+            }
+        }
+    }
+    if ($new) {
+        # Affiche toutes les mesures au-dessus du seuil, pas seulement la nouvelle
+        $hot = foreach ($k in 'CPU', 'GPU') { if ($vals[$k] -ge $DeckCfg.TempAlert) { "$k $(Format-Temp $vals[$k])" } }
+        $txt = $hot -join '  '   # « CPU 68°  GPU 70° » tient tout juste dans l'OSD
+        Log "Température : alerte $txt (seuil $($DeckCfg.TempAlert)°)"
+        Show-Osd "⚠ Température > $($DeckCfg.TempAlert)°" $txt 4000 '804000'
+    }
+}
+
+$tempTimer = New-Object System.Windows.Forms.Timer
+$tempTimer.Interval = $DeckCfg.TempCheckMs
+$tempTimer.add_Tick({ Safe { Check-Temps } })
+$tempTimer.Start()
 
 # ============================================================
 #  OUVERTURE / RAFRAÎCHISSEMENT
