@@ -6,7 +6,7 @@ Deux versions coexistent :
 
 | Fichier | Statut | Notes |
 |---------|--------|-------|
-| `peace_switch.ps1` | **Version principale** (PowerShell) | Aucun hook clavier/souris ni injection de touches : n'est pas détecté comme logiciel de triche par les anti-cheats (ex. Easy Anti-Cheat dans The Finals) |
+| `peace_switch.ps1` | **Version principale** (PowerShell) | Aucun hook clavier/souris ni injection de touches dans le jeu : n'est pas détecté comme logiciel de triche par les anti-cheats (ex. Easy Anti-Cheat dans The Finals) |
 | `peace_preamp.ahk` | Version d'origine (AutoHotkey v2) | Conservée comme référence / repli ; son hook clavier bas niveau et le binaire AutoHotkey sont détectés par certains anti-cheats |
 
 ## Fonctionnalités
@@ -31,8 +31,29 @@ Deux versions coexistent :
 | `Ctrl+Alt+F1` | Profil Enceintes |
 | `Ctrl+Alt+F2` | Profil Casque |
 | `Ctrl+Alt+B` | Écran noir |
+| `²` | Deck à l'écran (PowerShell uniquement) |
 
 > Les touches F13–F15 sont typiquement assignées via un clavier programmable ou un logiciel de remapping.
+
+## Deck à l'écran (`deck.ps1`)
+
+Équivalent d'un Stream Deck affiché par-dessus l'écran, chargé par `peace_switch.ps1`. La touche **²** l'ouvre au centre de l'écran de la fenêtre active. On clique sur un bouton, ou on tape son numéro (1–6). Échap, ² ou un clic ailleurs le referment, et le focus revient au jeu.
+
+| Bouton | Action |
+|--------|--------|
+| Casque / Enceintes | Bascule le profil audio (comme `Ctrl+Alt+F1/F2`) |
+| Micro | État du QuadCast S (actif / coupé / absent) ; clic = revérifier |
+| HDR | Active/désactive le HDR Windows sur les écrans qui le supportent (API DisplayConfig) |
+| GPU Stock / Overclock | Applique le profil Afterburner 1 (stock) ou 2 (OC) via `MSIAfterburner.exe -ProfileN` ; état lu via la limite de puissance (NVML) |
+| Sauver replay | Envoie `Alt+F10` (sauvegarde Instant Replay NVIDIA) |
+| Écran noir | Comme `Ctrl+Alt+B` |
+| CPU / GPU | Températures, lues dans la mémoire partagée d'Afterburner (rafraîchies chaque seconde) |
+
+Les numéros de profils Afterburner et le raccourci NVIDIA sont réglables dans `$Deck`, en haut de `deck.ps1`.
+
+**Anti-cheat** : la touche ² est réservée via `RegisterHotKey` comme les autres raccourcis (Windows l'avale : elle ne tape plus de ², ni dans les jeux qui l'utilisent pour leur console), pas de hook clavier. Les mesures se font en lecture seule (mémoire partagée Afterburner, NVML). La seule entrée simulée est `Alt+F10` (NVIDIA n'offre pas d'API pour l'Instant Replay) : elle est envoyée pendant que le deck a le focus, donc le jeu ne la reçoit pas.
+
+**Plein écran** : le deck s'affiche par-dessus les jeux en plein écran fenêtré / sans bordure (cas de la plupart des jeux DX12 / DX11 récents). Aucun programme externe ne peut s'afficher par-dessus un jeu en plein écran **exclusif** sans s'injecter dans son rendu (ce que font seulement les overlays autorisés par les anti-cheats : Steam, Discord, NVIDIA). Dans ce cas, le deck s'ouvre sur l'autre écran.
 
 ## Version PowerShell (`peace_switch.ps1`)
 

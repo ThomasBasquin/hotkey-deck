@@ -14,6 +14,7 @@
 #   Ctrl+Alt+F1      → profil enceintes
 #   Ctrl+Alt+F2      → profil casque
 #   Ctrl+Alt+B       → écran noir (Échap ou clic pour fermer)
+#   ²                → deck à l'écran (voir deck.ps1)
 #
 # Micro HyperX QuadCast S : icône dans la zone de notification (verte = actif,
 # rouge barrée = coupé, grise = débranché/inconnu). Le micro n'expose pas son
@@ -994,6 +995,7 @@ function On-Hotkey([int]$id) {
         4   { Switch-Profile 'enceintes' }
         5   { Switch-Profile 'casque' }
         6   { if ($S.Black.Count) { Hide-BlackScreen } else { Show-BlackScreen } }
+        7   { Toggle-Deck }
         100 { Hide-BlackScreen }
     }
 }
@@ -1070,6 +1072,9 @@ $micTimer = New-Object System.Windows.Forms.Timer
 $micTimer.Interval = 50
 $micTimer.add_Tick({ Safe { Poll-Mic } })
 $micTimer.Start()
+
+# Deck à l'écran (touche ²)
+. (Join-Path $PSScriptRoot 'deck.ps1')
 
 Log "Démarrage script — profil actif détecté : $((GetProfile).Label) ($(Fmt (GetProfile).Cur) dB)"
 if ($failed.Count) {
