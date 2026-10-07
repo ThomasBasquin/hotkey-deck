@@ -77,8 +77,8 @@ namespace HotkeyDeck {
 
         // Dimensions en pixels à 100 % : carte, écart entre les cartes d'une paire,
         // entre deux paires, marge, barre du bas (hauteur, écart entre le trait et
-        // ce qui l'entoure), bouton de la barre (largeur, écart)
-        const int TW = 160, TH = 128, GAP = 12, PAIRGAP = 22, PAD = 18, BAR = 40, LINE = 18, BW = 190, BGAP = 8;
+        // ce qui l'entoure), bouton de la barre (largeur, écart), retrait de l'état à droite
+        const int TW = 160, TH = 128, GAP = 12, PAIRGAP = 22, PAD = 18, BAR = 40, LINE = 18, BW = 190, BGAP = 8, STATUSPAD = 16;
 
         public List<Tile> Tiles = new List<Tile>();
         public event Action<string> TileClicked;
@@ -95,7 +95,7 @@ namespace HotkeyDeck {
         IntPtr prevFg;
         float scale = 1f;
         int hover = -1, pressed = -1;
-        Font fGlyph, fTitle, fSub, fBarLabel, fBarValue, fBarGlyph, fBarButton;
+        Font fGlyph, fTitle, fSub, fBarLabel, fBarValue, fBarGlyph;
 
         public DeckForm() {
             FormBorderStyle = FormBorderStyle.None;
@@ -179,14 +179,13 @@ namespace HotkeyDeck {
         }
 
         void BuildFonts() {
-            foreach (var f in new[] { fGlyph, fTitle, fSub, fBarLabel, fBarValue, fBarGlyph, fBarButton }) if (f != null) f.Dispose();
+            foreach (var f in new[] { fGlyph, fTitle, fSub, fBarLabel, fBarValue, fBarGlyph }) if (f != null) f.Dispose();
             fGlyph     = new Font("Segoe Fluent Icons", Pu(30), GraphicsUnit.Pixel);
             fTitle     = new Font("Segoe UI Semibold", Pu(14), GraphicsUnit.Pixel);
             fSub       = new Font("Segoe UI", Pu(11.5), GraphicsUnit.Pixel);
             fBarLabel  = new Font("Segoe UI", Pu(12.5), GraphicsUnit.Pixel);
             fBarValue  = new Font("Segoe UI Semibold", Pu(16), GraphicsUnit.Pixel);
             fBarGlyph  = new Font("Segoe Fluent Icons", Pu(17), GraphicsUnit.Pixel);
-            fBarButton = new Font("Segoe UI Semibold", Pu(13), GraphicsUnit.Pixel);
         }
 
         // Abscisse (à 100 %) de la colonne c : les cartes vont par paires
@@ -353,14 +352,14 @@ namespace HotkeyDeck {
             }
         }
 
-        // État de la barre, aligné à droite (sur le bord des cartes) :
+        // État de la barre, aligné à droite, un peu en retrait du bord des cartes :
         // [icône] Titre Valeur (en couleur d'accent)
         void DrawStatus(Graphics g, Tile t, Rectangle r, Color grey) {
             var fmt = StringFormat.GenericTypographic;
             float gw = string.IsNullOrEmpty(t.Glyph) ? 0 : g.MeasureString(t.Glyph, fBarGlyph, 1000, fmt).Width + Pu(6);
             float lw = g.MeasureString(t.Title, fBarLabel, 1000, fmt).Width + Pu(6);
             float vw = g.MeasureString(t.Value, fBarValue, 1000, fmt).Width;
-            float x = r.Right - gw - lw - vw, cy = r.Y + r.Height / 2f;
+            float x = r.Right - Px(STATUSPAD) - gw - lw - vw, cy = r.Y + r.Height / 2f;
             if (gw > 0)
                 using (var b = new SolidBrush(t.Accent))
                     g.DrawString(t.Glyph, fBarGlyph, b, x, cy - fBarGlyph.GetHeight(g) / 2, fmt);
@@ -383,21 +382,21 @@ namespace HotkeyDeck {
 
         // Bouton de la barre, contenu centré : [icône] Titre Sous-titre
         void DrawBarButton(Graphics g, Tile t, Rectangle r, int i, Color baseBg, Color grey) {
-            DrawCard(g, t, r, i, Pu(8), baseBg);
+            DrawCard(g, t, r, i, Pu(10), baseBg);
             var fmt = StringFormat.GenericTypographic;
             bool sub = !string.IsNullOrEmpty(t.Sub);
             float gw = g.MeasureString(t.Glyph, fBarGlyph, 1000, fmt).Width + Pu(7);
-            float lw = g.MeasureString(t.Title, fBarButton, 1000, fmt).Width + (sub ? Pu(7) : 0);
-            float sw = sub ? g.MeasureString(t.Sub, fBarLabel, 1000, fmt).Width : 0;
+            float lw = g.MeasureString(t.Title, fTitle, 1000, fmt).Width + (sub ? Pu(7) : 0);
+            float sw = sub ? g.MeasureString(t.Sub, fSub, 1000, fmt).Width : 0;
             float lead = GlyphLead(t.Glyph, fBarGlyph, fmt);
             float x = r.X + (r.Width - gw - lw - sw - lead) / 2, cy = r.Y + r.Height / 2f;
             using (var b = new SolidBrush(t.Accent))
                 g.DrawString(t.Glyph, fBarGlyph, b, x, cy - fBarGlyph.GetHeight(g) / 2, fmt);
             using (var b = new SolidBrush(Color.White))
-                g.DrawString(t.Title, fBarButton, b, x + gw, cy - fBarButton.GetHeight(g) / 2, fmt);
+                g.DrawString(t.Title, fTitle, b, x + gw, cy - fTitle.GetHeight(g) / 2, fmt);
             if (sub)
                 using (var b = new SolidBrush(t.On ? Color.FromArgb(0xD0, 0xD0, 0xD0) : grey))
-                    g.DrawString(t.Sub, fBarLabel, b, x + gw + lw, cy - fBarLabel.GetHeight(g) / 2, fmt);
+                    g.DrawString(t.Sub, fSub, b, x + gw + lw, cy - fSub.GetHeight(g) / 2, fmt);
         }
 
         protected override void OnPaint(PaintEventArgs e) {
@@ -635,12 +634,12 @@ function New-Tile([string]$id, [string]$glyph, [string]$accent) {
 
 # Les quatre actions sur une ligne, par paires, puis la barre audio en bas :
 #
-#   [Écran noir] [Instant Replay]   [HDR] [Overclock GPU]
+#   [HDR] [Overclock GPU]   [Écran noir] [Instant Replay]
 #   ─────────────────────────────────────────────────────
 #   [Casque] [Enceintes]                     Micro actif
 #
-# Écran noir et Instant Replay servent n'importe quand ; HDR et OC se règlent
-# avant de lancer un jeu, selon sa compatibilité. Un bouton « allumé »
+# HDR et OC se règlent avant de lancer un jeu, selon sa compatibilité ; Écran
+# noir et Instant Replay servent n'importe quand. Un bouton « allumé »
 # (teinté) est un état actif.
 function Add-Tile([string]$id, [string]$glyph, [string]$accent, [int]$col, [int]$row, [string]$title = '') {
     $t = New-Tile $id $glyph $accent
@@ -651,10 +650,10 @@ function Add-Tile([string]$id, [string]$glyph, [string]$accent, [int]$col, [int]
 
 $deck = New-Object HotkeyDeck.DeckForm
 $DeckTiles = [ordered]@{}
-Add-Tile 'black'     'E708' 'B4A7FF' 0 0 'Écran noir'
-Add-Tile 'replay'    'E7C8' '76B900' 1 0 'Instant Replay'
-Add-Tile 'hdr'       'E706' 'FFC83D' 2 0 'HDR'
-Add-Tile 'gpu'       'EC4A' 'FF8C42' 3 0 'Overclock GPU'
+Add-Tile 'hdr'       'E706' 'FFC83D' 0 0 'HDR'
+Add-Tile 'gpu'       'EC4A' 'FF8C42' 1 0 'Overclock GPU'
+Add-Tile 'black'     'E708' 'B4A7FF' 2 0 'Écran noir'
+Add-Tile 'replay'    'E7C8' '76B900' 3 0 'Instant Replay'
 # Barre du bas (Row = -1) : profils audio, puis l'état du micro. Le micro est
 # vérifié à chaque appui sur son capteur et à l'ouverture du deck : il n'a pas
 # besoin d'être cliquable
