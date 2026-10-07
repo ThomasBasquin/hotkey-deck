@@ -23,15 +23,19 @@ $DeckCfg = @{
     ProfileStock = 1     # profils Afterburner (Profile1.cfg / Profile2.cfg)
     ProfileOC    = 2
     ReplayKeys   = @(0xA4, 0x79)   # Alt gauche + F10 (sauvegarde Instant Replay)
-    # Alerte OSD si le CPU ou le GPU reste au-dessus de TempAlert (°C) pendant
-    # TempSustain relevés de suite (un toutes les TempCheckMs) ; nouvelle
-    # alerte seulement après être redescendu sous TempReset
-    TempAlert    = 67
-    TempReset    = 64
+    # Bandeau d'alerte si le CPU ou le GPU reste au-dessus de TempAlert (°C)
+    # pendant TempSustain relevés de suite (un toutes les TempCheckMs) ; il
+    # reste affiché jusqu'à être redescendu sous TempReset. En jeu : ~58 °C CPU,
+    # ~60 °C GPU (max 63 °C), d'où une marge pour l'été sans fausse alerte
+    TempAlert    = 72
+    TempReset    = 68
     TempSustain  = 2
     TempCheckMs  = 5000
-    # Bandeau d'alerte permanent si un ventilateur du GPU dépasse FanMax (%)
-    # pendant TempSustain relevés de suite (ventilateurs fixés à 35 % dans Afterburner)
+    # Bandeau aussi si une température n'est plus lue pendant SensorGrace
+    # relevés de suite (CPU : Afterburner fermé ou monitoring désactivé)
+    SensorGrace  = 12
+    # Bandeau si un ventilateur du GPU dépasse FanMax (%) pendant TempSustain
+    # relevés de suite (ventilateurs fixés à 35 % dans Afterburner)
     FanMax       = 35
 }
 
@@ -345,31 +349,27 @@ namespace HotkeyDeck {
             return p;
         }
 
-        static Color TempColor(string v) {
-            double t;
-            string num = v.TrimEnd('°', ' ', 'C');
-            if (!double.TryParse(num, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out t))
-                return Color.FromArgb(0x9A, 0x9A, 0x9A);
-            if (t >= 85) return Color.FromArgb(0xF8, 0x51, 0x49);
-            if (t >= 70) return Color.FromArgb(0xFF, 0xA6, 0x4D);
-            return Color.White;
-        }
-
-        // Élément de la barre d'état, centré : [icône] Titre Valeur
-        // (valeur en couleur d'accent, ou selon la température si elle finit par °)
+        // Élément de la barre d'état, centré : [icône] Titre Valeur (en couleur d'accent)
         void DrawStatus(Graphics g, Tile t, Rectangle r, Color grey) {
             var fmt = StringFormat.GenericTypographic;
             float gw = string.IsNullOrEmpty(t.Glyph) ? 0 : g.MeasureString(t.Glyph, fBarGlyph, 1000, fmt).Width + Pu(6);
             float lw = g.MeasureString(t.Title, fBarLabel, 1000, fmt).Width + Pu(6);
             float vw = g.MeasureString(t.Value, fBarValue, 1000, fmt).Width;
-            float x = r.X + (r.Width - gw - lw - vw) / 2, cy = r.Y + r.Height / 2f;
-            Color vc = t.Value.EndsWith("°") ? TempColor(t.Value) : t.Accent;
+            // L'icône a une marge vide à gauche dans sa boîte : on centre ce qui
+            // est réellement dessiné, sinon le groupe paraît décalé vers la droite
+            float lead = 0;
+            if (gw > 0)
+                using (var p = new GraphicsPath()) {
+                    p.AddString(t.Glyph, fBarGlyph.FontFamily, (int)fBarGlyph.Style, fBarGlyph.Size, PointF.Empty, fmt);
+                    lead = Math.Max(0, p.GetBounds().X);
+                }
+            float x = r.X + (r.Width - gw - lw - vw - lead) / 2, cy = r.Y + r.Height / 2f;
             if (gw > 0)
                 using (var b = new SolidBrush(t.Accent))
                     g.DrawString(t.Glyph, fBarGlyph, b, x, cy - fBarGlyph.GetHeight(g) / 2, fmt);
             using (var b = new SolidBrush(grey))
                 g.DrawString(t.Title, fBarLabel, b, x + gw, cy - fBarLabel.GetHeight(g) / 2, fmt);
-            using (var b = new SolidBrush(vc))
+            using (var b = new SolidBrush(t.Accent))
                 g.DrawString(t.Value, fBarValue, b, x + gw + lw, cy - fBarValue.GetHeight(g) / 2, fmt);
         }
 
@@ -623,7 +623,7 @@ function New-Tile([string]$id, [string]$glyph, [string]$accent) {
 #   [Casque]     [HDR]          [Overclock GPU]
 #   [Enceintes]  [Écran noir]   [Instant Replay]
 #   ──────────────────────────────────────────
-#    Micro actif    CPU 46°    GPU 27°
+#                  Micro actif
 #
 # Les cartes « allumées » (teintées) sont les états actifs. L'ordre des tuiles
 # donne les touches 1-6 (colonne par colonne).
@@ -647,8 +647,6 @@ Add-Tile 'replay'    'E7C8' '76B900' 2 1 'Instant Replay'
 # Barre d'état. Le micro est vérifié à chaque appui sur son capteur et à
 # l'ouverture du deck : il n'a pas besoin d'être cliquable
 Add-Tile 'mic'       'E720' '3FB950' 0 -1 'Micro'
-Add-Tile 'cpu'       ''     'FFFFFF' 1 -1 'CPU'
-Add-Tile 'gputemp'   ''     'FFFFFF' 2 -1 'GPU'
 $DeckTiles.black.Sub = 'Échap pour quitter'
 
 # Un bouton par profil : celui qui est actif est allumé, avec son volume
@@ -691,14 +689,6 @@ function Update-DeckGpu {
     $oc = [HotkeyDeck.Sensors]::GpuOverclocked()
     $t.On = $oc -eq 1
     $t.Sub = if ($oc -lt 0) { 'NVML indisponible' } else { '' }
-}
-
-function Format-Temp([float]$v) { if ([float]::IsNaN($v)) { '–' } else { '{0:0}°' -f $v } }
-
-function Update-DeckTemps {
-    [void][HotkeyDeck.Sensors]::Read()   # « – » si Afterburner est fermé
-    $DeckTiles.cpu.Value     = Format-Temp ([HotkeyDeck.Sensors]::Cpu)
-    $DeckTiles.gputemp.Value = Format-Temp ([HotkeyDeck.Sensors]::Gpu)
 }
 
 # ============================================================
@@ -779,25 +769,85 @@ function Invoke-DeckAction([string]$id) {
 }
 
 # ============================================================
-#  ALERTE TEMPÉRATURE
+#  ALERTES (bandeau permanent)
 # ============================================================
-# Hausse soutenue (pas un pic d'une seconde) : une alerte par dépassement,
-# réarmée une fois redescendu sous le seuil de réarmement
+# Bandeau rouge en haut au centre de l'écran principal, distinct de l'OSD du
+# bas (un changement de volume ne le masque pas), transparent aux clics. Une
+# ligne par alerte en cours ; il reste affiché tant qu'il en reste une, pour
+# ne pas pouvoir la manquer (une OSD de quelques secondes passe inaperçue).
+$alertBanner = New-Object HotkeyDeck.OsdForm
+$alertBanner.FormBorderStyle = 'None'
+$alertBanner.StartPosition   = 'Manual'
+$alertBanner.ShowInTaskbar   = $false
+$alertBanner.TopMost         = $true
+$alertBanner.BackColor       = [System.Drawing.ColorTranslator]::FromHtml('#8B1A1A')
+$alertBanner.Opacity         = 0.95
+$alertText = New-Object System.Windows.Forms.Label
+$alertText.AutoSize  = $false
+$alertText.Dock      = 'Fill'
+$alertText.TextAlign = 'MiddleCenter'
+$alertText.Font      = New-Object System.Drawing.Font('Segoe UI Semibold', 12)
+$alertText.ForeColor = [System.Drawing.Color]::White
+$alertBanner.Controls.Add($alertText)
+$alertBanner.add_HandleCreated({
+    $v = 2
+    [HotkeyDeck.Native]::DwmSetWindowAttribute($alertBanner.Handle, 33, [ref]$v, 4) | Out-Null
+})
+$S.Alerts = [ordered]@{ Temp = ''; Sensor = ''; Fans = '' }
+
+# Texte d'une alerte ('' = terminée) ; le bandeau est redimensionné au texte
+function Set-Alert([string]$key, [string]$text) {
+    if ($S.Alerts[$key] -eq $text) {
+        if ($alertBanner.Visible) { $alertBanner.TopMost = $true }
+        return
+    }
+    $S.Alerts[$key] = $text
+    $lines = @($S.Alerts.Values | Where-Object { $_ })
+    if (-not $lines) { $alertBanner.Hide(); return }
+    $alertText.Text = $lines -join "`n"
+    $gr = $alertText.CreateGraphics()
+    try {
+        $sz = [System.Windows.Forms.TextRenderer]::MeasureText($gr, $alertText.Text, $alertText.Font,
+            (New-Object System.Drawing.Size(2000, 2000)), [System.Windows.Forms.TextFormatFlags]::NoPadding)
+    } finally { $gr.Dispose() }
+    $alertBanner.ClientSize = New-Object System.Drawing.Size(
+        [Math]::Max((Px 320), $sz.Width + (Px 48)), [Math]::Max((Px 44), $sz.Height + (Px 22)))
+    $scr = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+    $alertBanner.Location = New-Object System.Drawing.Point(
+        [int]($scr.X + [Math]::Floor(($scr.Width - $alertBanner.Width) / 2)), [int]($scr.Y + (Px 24)))
+    if (-not $alertBanner.Visible) { $alertBanner.Show() }
+    $alertBanner.TopMost = $true
+}
+
+# ------------------------------------------------------------
+#  Températures
+# ------------------------------------------------------------
+# Hausse soutenue (pas un pic d'une seconde) : l'alerte dure jusqu'à être
+# redescendu sous TempReset. Une mesure absente trop longtemps est signalée
+# aussi : sinon l'alerte ne pourrait plus se déclencher, sans qu'on le sache
 $S.TempWatch = @{
-    CPU = @{ Above = 0; Alerted = $false }
-    GPU = @{ Above = 0; Alerted = $false }
+    CPU = @{ Above = 0; Alerted = $false; Missing = 0 }
+    GPU = @{ Above = 0; Alerted = $false; Missing = 0 }
 }
 
 function Check-Temps {
     [void][HotkeyDeck.Sensors]::Read()
     $vals = @{ CPU = [HotkeyDeck.Sensors]::Cpu; GPU = [HotkeyDeck.Sensors]::Gpu }
-    $new = $false
     foreach ($k in 'CPU', 'GPU') {
         $v = $vals[$k]; $w = $S.TempWatch[$k]
-        if ([float]::IsNaN($v)) { continue }
+        if ([float]::IsNaN($v)) {
+            $w.Missing++
+            if ($w.Missing -eq $DeckCfg.SensorGrace) { Log "Température : $k non lue depuis $($DeckCfg.SensorGrace * $DeckCfg.TempCheckMs / 1000) s (Afterburner fermé ?)" }
+            continue   # état d'alerte inchangé tant qu'on ne sait pas
+        }
+        if ($w.Missing -ge $DeckCfg.SensorGrace) { Log ("Température : {0} de nouveau lue ({1:0}°)" -f $k, $v) }
+        $w.Missing = 0
         if ($v -ge $DeckCfg.TempAlert) {
             $w.Above++
-            if ($w.Above -ge $DeckCfg.TempSustain -and -not $w.Alerted) { $w.Alerted = $true; $new = $true }
+            if ($w.Above -ge $DeckCfg.TempSustain -and -not $w.Alerted) {
+                $w.Alerted = $true
+                Log ("Température : alerte {0} {1:0}° (seuil {2}°)" -f $k, $v, $DeckCfg.TempAlert)
+            }
         } else {
             $w.Above = 0
             if ($w.Alerted -and $v -lt $DeckCfg.TempReset) {
@@ -806,43 +856,20 @@ function Check-Temps {
             }
         }
     }
-    if ($new) {
-        # Affiche toutes les mesures au-dessus du seuil, pas seulement la nouvelle
-        $hot = foreach ($k in 'CPU', 'GPU') { if ($vals[$k] -ge $DeckCfg.TempAlert) { "$k $(Format-Temp $vals[$k])" } }
-        $txt = $hot -join '  '   # « CPU 68°  GPU 70° » tient tout juste dans l'OSD
-        Log "Température : alerte $txt (seuil $($DeckCfg.TempAlert)°)"
-        Show-Osd "⚠ Température > $($DeckCfg.TempAlert)°" $txt 4000 '804000'
+    # Valeurs du moment, mises à jour à chaque relevé tant que l'alerte dure
+    $hot = foreach ($k in 'CPU', 'GPU') {
+        if ($S.TempWatch[$k].Alerted) {
+            if ([float]::IsNaN($vals[$k])) { "$k ?" } else { '{0} {1:0}°' -f $k, $vals[$k] }
+        }
     }
+    Set-Alert 'Temp' $(if ($hot) { "⚠  Température  $($hot -join '  ')" } else { '' })
+    $blind = @(foreach ($k in 'CPU', 'GPU') { if ($S.TempWatch[$k].Missing -ge $DeckCfg.SensorGrace) { $k } })
+    Set-Alert 'Sensor' $(if ($blind) { "⚠  Température $($blind -join ' et ') non surveillée" } else { '' })
 }
 
-# ============================================================
-#  ALERTE VENTILATEURS GPU (bandeau permanent)
-# ============================================================
-# Bandeau rouge en haut au centre de l'écran principal, distinct de l'OSD du
-# bas (un changement de volume ne le masque pas), transparent aux clics.
-# Reste affiché tant qu'un ventilateur dépasse FanMax.
-$fanBanner = New-Object HotkeyDeck.OsdForm
-$fanBanner.FormBorderStyle = 'None'
-$fanBanner.StartPosition   = 'Manual'
-$fanBanner.ShowInTaskbar   = $false
-$fanBanner.TopMost         = $true
-$fanBanner.BackColor       = [System.Drawing.ColorTranslator]::FromHtml('#8B1A1A')
-$fanBanner.Opacity         = 0.95
-$fanBanner.ClientSize      = New-Object System.Drawing.Size((Px 320), (Px 44))
-$scr = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
-$fanBanner.Location = New-Object System.Drawing.Point(
-    [int]($scr.X + [Math]::Floor(($scr.Width - $fanBanner.Width) / 2)), [int]($scr.Y + (Px 24)))
-$fanText = New-Object System.Windows.Forms.Label
-$fanText.AutoSize  = $false
-$fanText.Dock      = 'Fill'
-$fanText.TextAlign = 'MiddleCenter'
-$fanText.Font      = New-Object System.Drawing.Font('Segoe UI Semibold', 12)
-$fanText.ForeColor = [System.Drawing.Color]::White
-$fanBanner.Controls.Add($fanText)
-$fanBanner.add_HandleCreated({
-    $v = 2
-    [HotkeyDeck.Native]::DwmSetWindowAttribute($fanBanner.Handle, 33, [ref]$v, 4) | Out-Null
-})
+# ------------------------------------------------------------
+#  Ventilateurs GPU
+# ------------------------------------------------------------
 $S.FanWatch = @{ Above = 0; Shown = $false }
 
 function Check-Fans {
@@ -852,20 +879,18 @@ function Check-Fans {
     if ($pct -gt $DeckCfg.FanMax) {
         $w.Above++
         if ($w.Above -lt $DeckCfg.TempSustain) { return }
-        $fanText.Text = "⚠  Ventilateurs GPU à $pct %"
         if (-not $w.Shown) {
             $w.Shown = $true
             Log "Ventilateurs GPU : $pct % (> $($DeckCfg.FanMax) %), bandeau affiché"
-            $fanBanner.Show()
         }
-        $fanBanner.TopMost = $true
+        Set-Alert 'Fans' "⚠  Ventilateurs GPU à $pct %"
     } else {
         $w.Above = 0
         if ($w.Shown) {
             $w.Shown = $false
             Log "Ventilateurs GPU : revenus à $pct %, bandeau retiré"
-            $fanBanner.Hide()
         }
+        Set-Alert 'Fans' ''
     }
 }
 
@@ -881,7 +906,7 @@ function Open-Deck {
     if ($S.Black.Count) { Log 'Deck : ignoré, écran noir affiché'; return }   # pas par-dessus l'écran noir
     $sw = [Diagnostics.Stopwatch]::StartNew()
     # Une tuile qui échoue ne doit pas empêcher le deck de s'ouvrir
-    foreach ($u in 'Update-DeckAudio', 'Update-DeckMic', 'Update-DeckHdr', 'Update-DeckGpu', 'Update-DeckTemps') {
+    foreach ($u in 'Update-DeckAudio', 'Update-DeckMic', 'Update-DeckHdr', 'Update-DeckGpu') {
         try { & $u } catch { Log "Deck : $u en erreur : $($_.Exception.Message)" }
     }
     $prep = $sw.ElapsedMilliseconds
@@ -907,7 +932,7 @@ function Toggle-Deck([int]$mods = 0) {
     if ($deck.Visible) { $deck.HideDeck($true, 'touche ²') } else { Open-Deck }
 }
 
-# Températures et micro rafraîchis tant que le deck est ouvert
+# Micro rafraîchi tant que le deck est ouvert
 $deckTimer = New-Object System.Windows.Forms.Timer
 $deckTimer.Interval = 1000
 $deckTimer.add_Tick({ Safe {
@@ -919,7 +944,7 @@ $deckTimer.add_Tick({ Safe {
         if (-not $S.DeckNoFocus) { Log "Deck : affiché sans le focus (actif : $([HotkeyDeck.DeckForm]::DescribeForeground()))" }
         $S.DeckNoFocus = $true
     } else { $S.DeckNoFocus = $false }
-    Update-DeckMic; Update-DeckTemps
+    Update-DeckMic
     $deck.Invalidate()
 }})
 

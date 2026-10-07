@@ -5,7 +5,7 @@ Raccourcis clavier et deck à l'écran pour piloter un PC Windows de jeu, sans s
 - **Son** : volume (preamp d'[Equalizer APO](https://sourceforge.net/projects/equalizerapo/) / [Peace](https://sourceforge.net/projects/peace-equalizer-apo-extension/)) avec OSD, mute, bascule casque/enceintes
 - **Micro** : état du HyperX QuadCast S (actif / coupé) à l'OSD et dans le deck
 - **Écran** : écran noir anti burn-in OLED, bascule du HDR Windows
-- **GPU** : bascule entre les profils MSI Afterburner stock et overclock, températures CPU/GPU
+- **GPU** : bascule entre les profils MSI Afterburner stock et overclock, alertes de température CPU/GPU et de ventilateurs
 - **Enregistrement** : sauvegarde de l'Instant Replay NVIDIA
 
 Tout tient dans un script PowerShell lancé au démarrage. Le projet est né comme simple contrôle du preamp de Peace en AutoHotkey (`peace_preamp.ahk`, conservé comme repli).
@@ -41,7 +41,7 @@ Tout tient dans un script PowerShell lancé au démarrage. Le projet est né com
   [Casque]      [HDR]          [Overclock GPU]
   [Enceintes]   [Écran noir]   [Instant Replay]
   ─────────────────────────────────────────────
-   Micro actif      CPU 46°        GPU 27°
+                  Micro actif
 ```
 
 Les boutons sont rangés par thème, numérotés colonne par colonne. Une carte « allumée » (teintée) indique un état actif. La barre du bas est en lecture seule. Casque, Enceintes et Overclock GPU laissent le deck ouvert (la carte se met à jour) ; les autres boutons le referment.
@@ -54,13 +54,17 @@ Les boutons sont rangés par thème, numérotés colonne par colonne. Une carte 
 | Overclock GPU | Applique le profil Afterburner 2 (OC) ou 1 (stock) via `MSIAfterburner.exe -ProfileN` ; allumé quand l'OC est actif (limite de puissance relevée, lue via NVML) |
 | Instant Replay | Envoie `Alt+F10` (sauvegarde Instant Replay NVIDIA) |
 
-Barre d'état : état du micro (revérifié à chaque ouverture du deck et suivi en direct), températures CPU et GPU lues dans la mémoire partagée d'Afterburner (rafraîchies chaque seconde).
+Barre d'état : état du micro (revérifié à chaque ouverture du deck et suivi en direct). Les températures ne sont plus affichées : stables depuis des mois, elles ne sont plus surveillées que par les alertes ci-dessous.
 
-Les numéros de profils Afterburner, le raccourci NVIDIA et les seuils de l'alerte température sont réglables dans `$DeckCfg`, en haut de `deck.ps1`.
+Les numéros de profils Afterburner, le raccourci NVIDIA et les seuils des alertes sont réglables dans `$DeckCfg`, en haut de `deck.ps1`.
 
-**Alerte température** : l'OSD prévient quand le CPU ou le GPU reste au-dessus de 67 °C pendant deux relevés de suite (relevé toutes les 5 s, donc ~10 s : les pics brefs sont ignorés). Une seule alerte par dépassement, réarmée une fois redescendu sous 64 °C (en jeu, The Finals en 4K : ~58 °C CPU et ~60 °C GPU, max 63 °C).
+### Alertes
 
-**Alerte ventilateurs GPU** : bandeau rouge permanent en haut au centre de l'écran (« ⚠ Ventilateurs GPU à 52 % »), transparent aux clics, tant qu'un ventilateur dépasse 35 % pendant au moins deux relevés (ils sont fixés à 35 % dans Afterburner). La vitesse est lue au pilote (NVML) et non via Afterburner, pour détecter aussi le cas où Afterburner plante et que les ventilateurs repassent en automatique. Seuil réglable via `FanMax` dans `$DeckCfg`.
+Bandeau rouge en haut au centre de l'écran principal, transparent aux clics, distinct de l'OSD du bas. Une ligne par alerte en cours ; le bandeau reste affiché tant qu'il en reste une, pour ne pas pouvoir la manquer. Relevé toutes les 5 s, en continu (deck ouvert ou non).
+
+- **Température** (« ⚠ Température CPU 74° ») : le CPU ou le GPU reste à 72 °C ou plus pendant deux relevés de suite (~10 s : les pics brefs sont ignorés). Valeur mise à jour à chaque relevé ; l'alerte disparaît une fois redescendu sous 68 °C. En jeu (The Finals en 4K) : ~58 °C CPU et ~60 °C GPU, max 63 °C, d'où une marge pour l'été sans fausse alerte. Seuils : `TempAlert` / `TempReset`.
+- **Température non surveillée** (« ⚠ Température CPU non surveillée ») : une mesure manque depuis une minute (`SensorGrace` relevés). La température CPU vient seulement de la mémoire partagée d'Afterburner : sans cette alerte, fermer Afterburner (ou désactiver son monitoring CPU) couperait l'alerte CPU sans prévenir. Le GPU est lu au pilote (NVML) quand Afterburner manque.
+- **Ventilateurs GPU** (« ⚠ Ventilateurs GPU à 52 % ») : un ventilateur dépasse 35 % pendant au moins deux relevés (ils sont fixés à 35 % dans Afterburner). La vitesse est lue au pilote (NVML) et non via Afterburner, pour détecter aussi le cas où Afterburner plante et que les ventilateurs repassent en automatique. Seuil : `FanMax`.
 
 **Plein écran** : le deck s'affiche par-dessus les jeux en plein écran fenêtré / sans bordure (cas de la plupart des jeux DX12 / DX11 récents). Aucun programme externe ne peut s'afficher par-dessus un jeu en plein écran **exclusif** sans s'injecter dans son rendu (ce que font seulement les overlays autorisés par les anti-cheats : Steam, Discord, NVIDIA). Dans ce cas, le deck s'ouvre sur l'autre écran.
 
