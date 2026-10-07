@@ -79,7 +79,7 @@ namespace HotkeyDeck {
         // entre deux paires, marge, barre du bas (hauteur, écart entre le trait et
         // ce qui l'entoure), segment du sélecteur audio (largeur, retrait de la pastille
         // active), écart entre le sélecteur et l'état
-        const int TW = 160, TH = 128, GAP = 12, PAIRGAP = 22, PAD = 18, BAR = 40, LINE = 18, SW = 140, SEGINSET = 3, STATUSGAP = 56;
+        const int TW = 160, TH = 128, GAP = 12, PAIRGAP = 22, PAD = 18, BAR = 40, LINE = 18, SW = 140, SEGINSET = 3, STATUSGAP = 140;
 
         public List<Tile> Tiles = new List<Tile>();
         public event Action<string> TileClicked;
