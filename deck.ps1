@@ -75,12 +75,12 @@ namespace HotkeyDeck {
         [DllImport("shell32.dll")] static extern int SHQueryUserNotificationState(out int state);
         [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr h, int a, ref int v, int s);
 
-        // Dimensions en pixels à 100 % : carte, écart entre cartes d'une colonne,
-        // entre colonnes, marge, titres de colonnes, barre d'état
-        const int TW = 160, TH = 128, GAP = 12, COLGAP = 22, PAD = 18, HEAD = 30, BAR = 40, LINE = 11;   // LINE : écart entre le trait et la barre d'état
+        // Dimensions en pixels à 100 % : carte, écart entre les cartes d'une paire,
+        // entre deux paires, marge, barre du bas (hauteur, écart entre le trait et
+        // ce qui l'entoure), bouton de la barre (largeur, écart)
+        const int TW = 160, TH = 128, GAP = 12, PAIRGAP = 22, PAD = 18, BAR = 40, LINE = 18, BW = 190, BGAP = 8;
 
         public List<Tile> Tiles = new List<Tile>();
-        public string[] Headers = new string[0];   // titres des colonnes de boutons
         public event Action<string> TileClicked;
         public event Action<string> Info;   // historique (journal) : fermetures, focus perdu
         public bool Exclusive;        // plein écran exclusif détecté au dernier affichage
@@ -90,11 +90,12 @@ namespace HotkeyDeck {
 
         readonly List<Rectangle> rects = new List<Rectangle>();
         Rectangle barRect;
+        int lineY;   // trait de séparation, à mi-chemin entre les cartes et la barre
         readonly Timer fade = new Timer { Interval = 15 };
         IntPtr prevFg;
         float scale = 1f;
         int hover = -1, pressed = -1;
-        Font fGlyph, fTitle, fSub, fHead, fBarLabel, fBarValue, fBarGlyph;
+        Font fGlyph, fTitle, fSub, fBarLabel, fBarValue, fBarGlyph, fBarButton;
 
         public DeckForm() {
             FormBorderStyle = FormBorderStyle.None;
@@ -178,43 +179,48 @@ namespace HotkeyDeck {
         }
 
         void BuildFonts() {
-            foreach (var f in new[] { fGlyph, fTitle, fSub, fHead, fBarLabel, fBarValue, fBarGlyph }) if (f != null) f.Dispose();
-            fGlyph    = new Font("Segoe Fluent Icons", Pu(30), GraphicsUnit.Pixel);
-            fTitle    = new Font("Segoe UI Semibold", Pu(14), GraphicsUnit.Pixel);
-            fSub      = new Font("Segoe UI", Pu(11.5), GraphicsUnit.Pixel);
-            fHead     = new Font("Segoe UI Semibold", Pu(11), GraphicsUnit.Pixel);
-            fBarLabel = new Font("Segoe UI", Pu(12.5), GraphicsUnit.Pixel);
-            fBarValue = new Font("Segoe UI Semibold", Pu(16), GraphicsUnit.Pixel);
-            fBarGlyph = new Font("Segoe Fluent Icons", Pu(17), GraphicsUnit.Pixel);
+            foreach (var f in new[] { fGlyph, fTitle, fSub, fBarLabel, fBarValue, fBarGlyph, fBarButton }) if (f != null) f.Dispose();
+            fGlyph     = new Font("Segoe Fluent Icons", Pu(30), GraphicsUnit.Pixel);
+            fTitle     = new Font("Segoe UI Semibold", Pu(14), GraphicsUnit.Pixel);
+            fSub       = new Font("Segoe UI", Pu(11.5), GraphicsUnit.Pixel);
+            fBarLabel  = new Font("Segoe UI", Pu(12.5), GraphicsUnit.Pixel);
+            fBarValue  = new Font("Segoe UI Semibold", Pu(16), GraphicsUnit.Pixel);
+            fBarGlyph  = new Font("Segoe Fluent Icons", Pu(17), GraphicsUnit.Pixel);
+            fBarButton = new Font("Segoe UI Semibold", Pu(13), GraphicsUnit.Pixel);
         }
 
-        // Boutons placés par (Col, Row) sous les titres de colonnes ; les
-        // tuiles Row = -1 se partagent la barre d'état en bas, à parts égales
+        // Abscisse (à 100 %) de la colonne c : les cartes vont par paires
+        static int ColX(int c) { return PAD + c * (TW + GAP) + (c / 2) * (PAIRGAP - GAP); }
+
+        // Cartes placées par (Col, Row). Tuiles Row = -1 : barre du bas, avec
+        // les boutons (cliquables) alignés à gauche et l'état (non cliquable)
+        // aligné à droite dans la place restante
         Size LayoutTiles() {
             rects.Clear();
-            int cols = 1, rows = 1, nbar = 0;
+            int cols = 1, rows = 1;
+            bool bar = false;
             foreach (var t in Tiles) {
-                if (t.Row < 0) { nbar++; continue; }
+                if (t.Row < 0) { bar = true; continue; }
                 cols = Math.Max(cols, t.Col + 1);
                 rows = Math.Max(rows, t.Row + 1);
             }
-            int top = PAD + (Headers.Length > 0 ? HEAD : 0);
-            int w = 2 * PAD + cols * TW + (cols - 1) * COLGAP;
-            int gridBottom = top + rows * TH + (rows - 1) * GAP;
-            // Trait de séparation à égale distance des cartes et du texte de la
-            // barre (texte centré dans BAR), marge du bas proche de celle du haut
-            int barTop = gridBottom + 24 + LINE;
+            int w = ColX(cols - 1) + TW + PAD;
+            int gridBottom = PAD + rows * TH + (rows - 1) * GAP;
+            // Trait de séparation à égale distance des cartes et de la barre
+            int barTop = gridBottom + 2 * LINE;
             barRect = new Rectangle(Px(PAD), Px(barTop), Px(w - 2 * PAD), Px(BAR));
-            int k = 0;
+            lineY = (Px(gridBottom) + barRect.Y) / 2;
+            int bx = 0;
             foreach (var t in Tiles) {
                 if (t.Row >= 0)
-                    rects.Add(new Rectangle(Px(PAD + t.Col * (TW + COLGAP)), Px(top + t.Row * (TH + GAP)), Px(TW), Px(TH)));
-                else {
-                    rects.Add(new Rectangle(barRect.X + barRect.Width * k / nbar, barRect.Y, barRect.Width / nbar, barRect.Height));
-                    k++;
-                }
+                    rects.Add(new Rectangle(Px(ColX(t.Col)), Px(PAD + t.Row * (TH + GAP)), Px(TW), Px(TH)));
+                else if (t.Clickable) {
+                    rects.Add(new Rectangle(barRect.X + Px(bx), barRect.Y, Px(BW), barRect.Height));
+                    bx += BW + BGAP;
+                } else
+                    rects.Add(new Rectangle(barRect.X + Px(bx), barRect.Y, barRect.Width - Px(bx), barRect.Height));
             }
-            return new Size(Px(w), Px(barTop + (nbar > 0 ? BAR + 9 : 0)));
+            return new Size(Px(w), bar ? Px(barTop + BAR + PAD) : Px(gridBottom + PAD));
         }
 
         // Processus d'une fenêtre, pour le journal (pas le titre : il peut
@@ -337,21 +343,24 @@ namespace HotkeyDeck {
             return p;
         }
 
-        // Élément de la barre d'état, centré : [icône] Titre Valeur (en couleur d'accent)
+        // Marge vide à gauche d'une icône dans sa boîte : on aligne ce qui est
+        // réellement dessiné, sinon le groupe paraît décalé vers la droite
+        static float GlyphLead(string glyph, Font f, StringFormat fmt) {
+            if (string.IsNullOrEmpty(glyph)) return 0;
+            using (var p = new GraphicsPath()) {
+                p.AddString(glyph, f.FontFamily, (int)f.Style, f.Size, PointF.Empty, fmt);
+                return Math.Max(0, p.GetBounds().X);
+            }
+        }
+
+        // État de la barre, aligné à droite (sur le bord des cartes) :
+        // [icône] Titre Valeur (en couleur d'accent)
         void DrawStatus(Graphics g, Tile t, Rectangle r, Color grey) {
             var fmt = StringFormat.GenericTypographic;
             float gw = string.IsNullOrEmpty(t.Glyph) ? 0 : g.MeasureString(t.Glyph, fBarGlyph, 1000, fmt).Width + Pu(6);
             float lw = g.MeasureString(t.Title, fBarLabel, 1000, fmt).Width + Pu(6);
             float vw = g.MeasureString(t.Value, fBarValue, 1000, fmt).Width;
-            // L'icône a une marge vide à gauche dans sa boîte : on centre ce qui
-            // est réellement dessiné, sinon le groupe paraît décalé vers la droite
-            float lead = 0;
-            if (gw > 0)
-                using (var p = new GraphicsPath()) {
-                    p.AddString(t.Glyph, fBarGlyph.FontFamily, (int)fBarGlyph.Style, fBarGlyph.Size, PointF.Empty, fmt);
-                    lead = Math.Max(0, p.GetBounds().X);
-                }
-            float x = r.X + (r.Width - gw - lw - vw - lead) / 2, cy = r.Y + r.Height / 2f;
+            float x = r.Right - gw - lw - vw, cy = r.Y + r.Height / 2f;
             if (gw > 0)
                 using (var b = new SolidBrush(t.Accent))
                     g.DrawString(t.Glyph, fBarGlyph, b, x, cy - fBarGlyph.GetHeight(g) / 2, fmt);
@@ -359,6 +368,36 @@ namespace HotkeyDeck {
                 g.DrawString(t.Title, fBarLabel, b, x + gw, cy - fBarLabel.GetHeight(g) / 2, fmt);
             using (var b = new SolidBrush(t.Accent))
                 g.DrawString(t.Value, fBarValue, b, x + gw + lw, cy - fBarValue.GetHeight(g) / 2, fmt);
+        }
+
+        // Fond d'un bouton : teinté de la couleur d'accent s'il est actif, éclairci au survol
+        void DrawCard(Graphics g, Tile t, Rectangle r, int i, int radius, Color baseBg) {
+            Color bg = t.On ? Mix(baseBg, t.Accent, 0.28) : baseBg;
+            if (t.Clickable && i == hover) bg = Mix(bg, Color.White, i == pressed ? 0.03 : 0.08);
+            using (var path = Round(r, radius))
+            using (var br = new SolidBrush(bg)) {
+                g.FillPath(br, path);
+                if (t.On) using (var pen = new Pen(Mix(bg, t.Accent, 0.6), Pu(1.5))) g.DrawPath(pen, path);
+            }
+        }
+
+        // Bouton de la barre, contenu centré : [icône] Titre Sous-titre
+        void DrawBarButton(Graphics g, Tile t, Rectangle r, int i, Color baseBg, Color grey) {
+            DrawCard(g, t, r, i, Pu(8), baseBg);
+            var fmt = StringFormat.GenericTypographic;
+            bool sub = !string.IsNullOrEmpty(t.Sub);
+            float gw = g.MeasureString(t.Glyph, fBarGlyph, 1000, fmt).Width + Pu(7);
+            float lw = g.MeasureString(t.Title, fBarButton, 1000, fmt).Width + (sub ? Pu(7) : 0);
+            float sw = sub ? g.MeasureString(t.Sub, fBarLabel, 1000, fmt).Width : 0;
+            float lead = GlyphLead(t.Glyph, fBarGlyph, fmt);
+            float x = r.X + (r.Width - gw - lw - sw - lead) / 2, cy = r.Y + r.Height / 2f;
+            using (var b = new SolidBrush(t.Accent))
+                g.DrawString(t.Glyph, fBarGlyph, b, x, cy - fBarGlyph.GetHeight(g) / 2, fmt);
+            using (var b = new SolidBrush(Color.White))
+                g.DrawString(t.Title, fBarButton, b, x + gw, cy - fBarButton.GetHeight(g) / 2, fmt);
+            if (sub)
+                using (var b = new SolidBrush(t.On ? Color.FromArgb(0xD0, 0xD0, 0xD0) : grey))
+                    g.DrawString(t.Sub, fBarLabel, b, x + gw + lw, cy - fBarLabel.GetHeight(g) / 2, fmt);
         }
 
         protected override void OnPaint(PaintEventArgs e) {
@@ -371,29 +410,22 @@ namespace HotkeyDeck {
             var baseBg = Color.FromArgb(0x2B, 0x2B, 0x2B);
             var grey = Color.FromArgb(0x9A, 0x9A, 0x9A);
 
-            // Titres des colonnes (SON, À TOUT MOMENT, AVANT LE JEU)
-            using (var b = new SolidBrush(Color.FromArgb(0x80, 0x80, 0x80)))
-                for (int c = 0; c < Headers.Length; c++)
-                    g.DrawString(Headers[c], fHead, b, new RectangleF(Px(PAD + c * (TW + COLGAP)), Px(PAD), Px(TW), Px(HEAD - 8)), center);
-
-            // Barre d'état : séparée des boutons par un trait, sans cartes
+            // Barre du bas : séparée des cartes par un trait
             if (barRect.Height > 0)
                 using (var pen = new Pen(Color.FromArgb(0x38, 0x38, 0x38), Math.Max(1, Px(1))))
-                    g.DrawLine(pen, barRect.X, barRect.Y - Px(LINE), barRect.Right, barRect.Y - Px(LINE));
+                    g.DrawLine(pen, barRect.X, lineY, barRect.Right, lineY);
 
             for (int i = 0; i < Tiles.Count && i < rects.Count; i++) {
                 var t = Tiles[i];
                 var r = rects[i];
 
-                if (t.Row < 0) { DrawStatus(g, t, r, grey); continue; }
-
-                Color bg = t.On ? Mix(baseBg, t.Accent, 0.28) : baseBg;
-                if (t.Clickable && i == hover) bg = Mix(bg, Color.White, i == pressed ? 0.03 : 0.08);
-                using (var path = Round(r, Pu(10)))
-                using (var br = new SolidBrush(bg)) {
-                    g.FillPath(br, path);
-                    if (t.On) using (var pen = new Pen(Mix(bg, t.Accent, 0.6), Pu(1.5))) g.DrawPath(pen, path);
+                if (t.Row < 0) {
+                    if (t.Clickable) DrawBarButton(g, t, r, i, baseBg, grey);
+                    else DrawStatus(g, t, r, grey);
+                    continue;
                 }
+
+                DrawCard(g, t, r, i, Pu(10), baseBg);
 
                 // Sans sous-titre, icône et titre sont recentrés verticalement
                 int dy = string.IsNullOrEmpty(t.Sub) ? Pu(9) : 0;
@@ -601,38 +633,35 @@ function New-Tile([string]$id, [string]$glyph, [string]$accent) {
     $t
 }
 
-# Colonnes par moment d'usage, puis une barre d'état (lecture seule) en bas :
+# Les quatre actions sur une ligne, par paires, puis la barre audio en bas :
 #
-#     SON          À TOUT MOMENT      AVANT LE JEU
-#   [Casque]     [Écran noir]       [HDR]
-#   [Enceintes]  [Instant Replay]   [Overclock GPU]
-#   ──────────────────────────────────────────────
-#                    Micro actif
+#   [Écran noir] [Instant Replay]   [HDR] [Overclock GPU]
+#   ─────────────────────────────────────────────────────
+#   [Casque] [Enceintes]                     Micro actif
 #
-# HDR et OC se règlent avant de lancer un jeu, selon sa compatibilité. Instant
-# Replay, l'action urgente en jeu, est sous le centre de l'écran, là où le jeu
-# laisse en général le curseur. Les cartes « allumées » (teintées) sont les
-# états actifs.
+# Écran noir et Instant Replay servent n'importe quand ; HDR et OC se règlent
+# avant de lancer un jeu, selon sa compatibilité. Un bouton « allumé »
+# (teinté) est un état actif.
 function Add-Tile([string]$id, [string]$glyph, [string]$accent, [int]$col, [int]$row, [string]$title = '') {
     $t = New-Tile $id $glyph $accent
     $t.Col = $col; $t.Row = $row; $t.Title = $title
-    if ($row -lt 0) { $t.Clickable = $false }
     $DeckTiles[$id] = $t
     $deck.Tiles.Add($t)
 }
 
 $deck = New-Object HotkeyDeck.DeckForm
-$deck.Headers = [string[]]@('SON', 'À TOUT MOMENT', 'AVANT LE JEU')
 $DeckTiles = [ordered]@{}
-Add-Tile 'casque'    'E7F6' '4CC2FF' 0 0 'Casque'
-Add-Tile 'enceintes' 'E7F5' '4CC2FF' 0 1 'Enceintes'
-Add-Tile 'black'     'E708' 'B4A7FF' 1 0 'Écran noir'
-Add-Tile 'replay'    'E7C8' '76B900' 1 1 'Instant Replay'
+Add-Tile 'black'     'E708' 'B4A7FF' 0 0 'Écran noir'
+Add-Tile 'replay'    'E7C8' '76B900' 1 0 'Instant Replay'
 Add-Tile 'hdr'       'E706' 'FFC83D' 2 0 'HDR'
-Add-Tile 'gpu'       'EC4A' 'FF8C42' 2 1 'Overclock GPU'
-# Barre d'état. Le micro est vérifié à chaque appui sur son capteur et à
-# l'ouverture du deck : il n'a pas besoin d'être cliquable
-Add-Tile 'mic'       'E720' '3FB950' 0 -1 'Micro'
+Add-Tile 'gpu'       'EC4A' 'FF8C42' 3 0 'Overclock GPU'
+# Barre du bas (Row = -1) : profils audio, puis l'état du micro. Le micro est
+# vérifié à chaque appui sur son capteur et à l'ouverture du deck : il n'a pas
+# besoin d'être cliquable
+Add-Tile 'casque'    'E7F6' '4CC2FF' 0 -1 'Casque'
+Add-Tile 'enceintes' 'E7F5' '4CC2FF' 1 -1 'Enceintes'
+Add-Tile 'mic'       'E720' '3FB950' 2 -1 'Micro'
+$DeckTiles.mic.Clickable = $false
 $DeckTiles.black.Sub = 'Échap pour quitter'
 
 # Un bouton par profil : celui qui est actif est allumé, avec son volume

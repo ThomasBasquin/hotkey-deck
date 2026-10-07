@@ -37,14 +37,12 @@ Tout tient dans un script PowerShell lancé au démarrage. Le projet est né com
 Équivalent d'un Stream Deck affiché par-dessus l'écran. La touche **²** l'ouvre au centre de l'écran de la fenêtre active. On clique sur un bouton (souris seulement : les touches 1–9 ne font rien, pour éviter un déclenchement par réflexe en jeu). Échap, ² ou un clic ailleurs le referment, et le focus revient au jeu.
 
 ```
-    SON           À TOUT MOMENT      AVANT LE JEU
-  [Casque]      [Écran noir]       [HDR]
-  [Enceintes]   [Instant Replay]   [Overclock GPU]
-  ─────────────────────────────────────────────────
-                    Micro actif
+  [Écran noir] [Instant Replay]   [HDR] [Overclock GPU]
+  ─────────────────────────────────────────────────────
+  [Casque -10 dB] [Enceintes]               Micro actif
 ```
 
-Les boutons sont rangés par moment d'usage : HDR et Overclock GPU se règlent avant de lancer un jeu (selon qu'il supporte le HDR ou l'OC), Écran noir et Instant Replay servent n'importe quand. Instant Replay, l'action urgente en jeu, est sous le centre de l'écran, là où le jeu laisse en général le curseur. Une carte « allumée » (teintée) indique un état actif. La barre du bas est en lecture seule. Casque, Enceintes et Overclock GPU laissent le deck ouvert (la carte se met à jour) ; les autres boutons le referment.
+Les quatre actions sont sur une ligne, par paires : Écran noir et Instant Replay servent n'importe quand, HDR et Overclock GPU se règlent avant de lancer un jeu (selon qu'il supporte le HDR ou l'OC). La barre du bas regroupe l'audio : les deux profils (boutons plus petits) et l'état du micro, en lecture seule. Un bouton « allumé » (teinté) indique un état actif. Casque, Enceintes et Overclock GPU laissent le deck ouvert (le bouton se met à jour) ; les autres boutons le referment.
 
 | Bouton | Action |
 |--------|--------|
