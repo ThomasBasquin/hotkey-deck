@@ -34,7 +34,7 @@ Tout tient dans un script PowerShell lancé au démarrage. Le projet est né com
 
 ## Deck à l'écran
 
-Équivalent d'un Stream Deck affiché par-dessus l'écran. La touche **²** l'ouvre au centre de l'écran de la fenêtre active. On clique sur un bouton, ou on tape son numéro (1–6). Échap, ² ou un clic ailleurs le referment, et le focus revient au jeu.
+Équivalent d'un Stream Deck affiché par-dessus l'écran. La touche **²** l'ouvre au centre de l'écran de la fenêtre active. On clique sur un bouton (souris seulement : les touches 1–9 ne font rien, pour éviter un déclenchement par réflexe en jeu). Échap, ² ou un clic ailleurs le referment, et le focus revient au jeu.
 
 ```
     SON           ÉCRAN          JEU
@@ -44,7 +44,7 @@ Tout tient dans un script PowerShell lancé au démarrage. Le projet est né com
                   Micro actif
 ```
 
-Les boutons sont rangés par thème, numérotés colonne par colonne. Une carte « allumée » (teintée) indique un état actif. La barre du bas est en lecture seule. Casque, Enceintes et Overclock GPU laissent le deck ouvert (la carte se met à jour) ; les autres boutons le referment.
+Les boutons sont rangés par thème. Une carte « allumée » (teintée) indique un état actif. La barre du bas est en lecture seule. Casque, Enceintes et Overclock GPU laissent le deck ouvert (la carte se met à jour) ; les autres boutons le referment.
 
 | Bouton | Action |
 |--------|--------|

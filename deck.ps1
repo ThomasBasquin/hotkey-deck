@@ -1,8 +1,8 @@
 ﻿# Deck — "Stream Deck" à l'écran, chargé par hotkey_deck.ps1 (dot-source)
 #
 # La touche ² (AZERTY, à gauche de 1) ouvre une grille de
-# boutons au centre de l'écran du jeu / de la fenêtre active ; clic, ou touches
-# 1-9, pour lancer une action. Échap, ² ou un clic ailleurs referme.
+# boutons au centre de l'écran du jeu / de la fenêtre active ; un clic lance
+# une action (souris seulement). Échap, ² ou un clic ailleurs referme.
 #
 # Compatible anti-cheat, comme le reste du script :
 #   - touche ² réservée via RegisterHotKey (Windows l'avale : elle ne tape
@@ -94,7 +94,7 @@ namespace HotkeyDeck {
         IntPtr prevFg;
         float scale = 1f;
         int hover = -1, pressed = -1;
-        Font fGlyph, fTitle, fSub, fHead, fBarLabel, fBarValue, fBarGlyph, fIndex;
+        Font fGlyph, fTitle, fSub, fHead, fBarLabel, fBarValue, fBarGlyph;
 
         public DeckForm() {
             FormBorderStyle = FormBorderStyle.None;
@@ -166,14 +166,6 @@ namespace HotkeyDeck {
         // Contenu des cartes : cotes d'origine (carte de 112 de haut) mises à l'échelle de TH
         int Pu(double v) { return Px(v * TH / 112.0); }
 
-        // Numéro clavier (1-9) des tuiles cliquables, dans l'ordre d'affichage ; 0 = aucun
-        int KeyNumber(int i) {
-            if (!Tiles[i].Clickable) return 0;
-            int n = 0;
-            for (int k = 0; k <= i; k++) if (Tiles[k].Clickable) n++;
-            return n <= 9 ? n : 0;
-        }
-
         // Écran de la fenêtre active, ou un autre si elle est en plein écran exclusif
         Screen PickScreen(IntPtr fg) {
             Screen s = fg != IntPtr.Zero ? Screen.FromHandle(fg) : Screen.FromPoint(Cursor.Position);
@@ -186,7 +178,7 @@ namespace HotkeyDeck {
         }
 
         void BuildFonts() {
-            foreach (var f in new[] { fGlyph, fTitle, fSub, fHead, fBarLabel, fBarValue, fBarGlyph, fIndex }) if (f != null) f.Dispose();
+            foreach (var f in new[] { fGlyph, fTitle, fSub, fHead, fBarLabel, fBarValue, fBarGlyph }) if (f != null) f.Dispose();
             fGlyph    = new Font("Segoe Fluent Icons", Pu(30), GraphicsUnit.Pixel);
             fTitle    = new Font("Segoe UI Semibold", Pu(14), GraphicsUnit.Pixel);
             fSub      = new Font("Segoe UI", Pu(11.5), GraphicsUnit.Pixel);
@@ -194,7 +186,6 @@ namespace HotkeyDeck {
             fBarLabel = new Font("Segoe UI", Pu(12.5), GraphicsUnit.Pixel);
             fBarValue = new Font("Segoe UI Semibold", Pu(16), GraphicsUnit.Pixel);
             fBarGlyph = new Font("Segoe Fluent Icons", Pu(17), GraphicsUnit.Pixel);
-            fIndex    = new Font("Segoe UI", Pu(10), GraphicsUnit.Pixel);
         }
 
         // Boutons placés par (Col, Row) sous les titres de colonnes ; les
@@ -299,13 +290,10 @@ namespace HotkeyDeck {
             if (restore && prevFg != IntPtr.Zero && IsWindow(prevFg)) SetForegroundWindow(prevFg);
         }
 
+        // Souris seulement : aucune touche ne lance d'action (un 1 tapé par
+        // réflexe en jeu, pour changer d'arme, déclencherait un bouton)
         protected override void OnKeyDown(KeyEventArgs e) {
-            if (e.KeyCode == Keys.Escape) { HideDeck(true, "Échap"); return; }
-            int n = 0;
-            if (e.KeyCode >= Keys.D1 && e.KeyCode <= Keys.D9) n = e.KeyCode - Keys.D1 + 1;
-            else if (e.KeyCode >= Keys.NumPad1 && e.KeyCode <= Keys.NumPad9) n = e.KeyCode - Keys.NumPad1 + 1;
-            if (n == 0) return;
-            for (int i = 0; i < Tiles.Count; i++) if (KeyNumber(i) == n) { Fire(i); return; }
+            if (e.KeyCode == Keys.Escape) HideDeck(true, "Échap");
         }
 
         void Fire(int i) {
@@ -416,10 +404,6 @@ namespace HotkeyDeck {
                 if (dy == 0)
                     using (var b = new SolidBrush(t.On ? Color.FromArgb(0xD0, 0xD0, 0xD0) : grey))
                         g.DrawString(t.Sub, fSub, b, new RectangleF(r.X + Pu(4), r.Y + Pu(84), r.Width - Pu(8), Pu(18)), center);
-                int num = KeyNumber(i);
-                if (num > 0)
-                    using (var b = new SolidBrush(Color.FromArgb(0x5A, 0x5A, 0x5A)))
-                        g.DrawString(num.ToString(), fIndex, b, r.X + Pu(7), r.Y + Pu(5));
             }
         }
     }
@@ -625,8 +609,7 @@ function New-Tile([string]$id, [string]$glyph, [string]$accent) {
 #   ──────────────────────────────────────────
 #                  Micro actif
 #
-# Les cartes « allumées » (teintées) sont les états actifs. L'ordre des tuiles
-# donne les touches 1-6 (colonne par colonne).
+# Les cartes « allumées » (teintées) sont les états actifs.
 function Add-Tile([string]$id, [string]$glyph, [string]$accent, [int]$col, [int]$row, [string]$title = '') {
     $t = New-Tile $id $glyph $accent
     $t.Col = $col; $t.Row = $row; $t.Title = $title
