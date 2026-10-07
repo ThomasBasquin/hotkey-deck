@@ -78,8 +78,8 @@ namespace HotkeyDeck {
         // Dimensions en pixels à 100 % : carte, écart entre les cartes d'une paire,
         // entre deux paires, marge, barre du bas (hauteur, écart entre le trait et
         // ce qui l'entoure), segment du sélecteur audio (largeur, retrait de la pastille
-        // active), écart avant le volume, retrait de l'état à droite
-        const int TW = 160, TH = 128, GAP = 12, PAIRGAP = 22, PAD = 18, BAR = 40, LINE = 18, SW = 140, SEGINSET = 3, VOLGAP = 14, STATUSPAD = 16;
+        // active), écart entre le sélecteur et l'état
+        const int TW = 160, TH = 128, GAP = 12, PAIRGAP = 22, PAD = 18, BAR = 40, LINE = 18, SW = 140, SEGINSET = 3, STATUSGAP = 28;
 
         public List<Tile> Tiles = new List<Tile>();
         public event Action<string> TileClicked;
@@ -196,9 +196,7 @@ namespace HotkeyDeck {
         // Abscisse (à 100 %) de la colonne c : les cartes vont par paires
         static int ColX(int c) { return PAD + c * (TW + GAP) + (c / 2) * (PAIRGAP - GAP); }
 
-        // Cartes placées par (Col, Row). Tuiles Row = -1 : barre du bas, avec le
-        // sélecteur (tuiles cliquables, accolées en segments) à gauche et l'état
-        // (non cliquable) aligné à droite dans la place restante
+        // Cartes placées par (Col, Row) ; tuiles Row = -1 : barre du bas (LayoutBar)
         Size LayoutTiles() {
             rects.Clear();
             int cols = 1, rows = 1;
@@ -214,18 +212,39 @@ namespace HotkeyDeck {
             int barTop = gridBottom + 2 * LINE;
             barRect = new Rectangle(Px(PAD), Px(barTop), Px(w - 2 * PAD), Px(BAR));
             lineY = (Px(gridBottom) + barRect.Y) / 2;
-            int bx = 0;
-            foreach (var t in Tiles) {
-                if (t.Row >= 0)
-                    rects.Add(new Rectangle(Px(ColX(t.Col)), Px(PAD + t.Row * (TH + GAP)), Px(TW), Px(TH)));
-                else if (t.Clickable) {
-                    rects.Add(new Rectangle(barRect.X + Px(bx), barRect.Y, Px(bx + SW) - Px(bx), barRect.Height));
-                    bx += SW;
-                } else
-                    rects.Add(new Rectangle(barRect.X + Px(bx), barRect.Y, barRect.Width - Px(bx), barRect.Height));
-            }
-            segRect = new Rectangle(barRect.X, barRect.Y, Px(bx), barRect.Height);
+            foreach (var t in Tiles)
+                rects.Add(t.Row >= 0 ? new Rectangle(Px(ColX(t.Col)), Px(PAD + t.Row * (TH + GAP)), Px(TW), Px(TH)) : Rectangle.Empty);
+            if (bar)
+                using (var bmp = new Bitmap(1, 1))
+                using (var g = Graphics.FromImage(bmp)) {
+                    g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;   // comme au dessin
+                    LayoutBar(g);
+                }
             return new Size(Px(w), bar ? Px(barTop + BAR + PAD) : Px(gridBottom + PAD));
+        }
+
+        // Barre du bas : sélecteur (tuiles cliquables, accolées en segments) puis
+        // état (non cliquable), centrés ensemble sur la valeur affichée. Refait à
+        // chaque dessin : si le micro change d'état deck ouvert, le groupe se
+        // recentre (quelques px)
+        void LayoutBar(Graphics g) {
+            int nseg = 0;
+            Tile status = null;
+            foreach (var t in Tiles) if (t.Row < 0) { if (t.Clickable) nseg++; else status = t; }
+            int segW = Px(nseg * SW);
+            int sw = status == null ? 0 : (int)Math.Ceiling(StatusWidth(g, status, status.Value));
+            int x0 = barRect.X + (barRect.Width - segW - (status == null ? 0 : Px(STATUSGAP) + sw)) / 2;
+            segRect = new Rectangle(x0, barRect.Y, segW, barRect.Height);
+            int k = 0;
+            for (int i = 0; i < Tiles.Count; i++) {
+                var t = Tiles[i];
+                if (t.Row >= 0) continue;
+                if (t.Clickable) {
+                    rects[i] = new Rectangle(x0 + Px(k * SW), barRect.Y, Px((k + 1) * SW) - Px(k * SW), barRect.Height);
+                    k++;
+                } else
+                    rects[i] = new Rectangle(segRect.Right + Px(STATUSGAP), barRect.Y, sw, barRect.Height);
+            }
         }
 
         // Processus d'une fenêtre, pour le journal (pas le titre : il peut
@@ -393,14 +412,28 @@ namespace HotkeyDeck {
             return baseY - Ascent(f) + (baseFix.TryGetValue(f, out fix) ? fix : 0);
         }
 
-        // État de la barre, aligné à droite, un peu en retrait du bord des cartes :
-        // [icône] Titre Valeur (en couleur d'accent), sur la ligne de base de la barre
+        // Largeurs de l'état : icône + écart, titre + écart, valeur
+        void StatusParts(Graphics g, Tile t, string value, out float gw, out float lw, out float vw) {
+            var fmt = StringFormat.GenericTypographic;
+            gw = string.IsNullOrEmpty(t.Glyph) ? 0 : g.MeasureString(t.Glyph, fBarGlyph, 1000, fmt).Width + Pu(6);
+            lw = g.MeasureString(t.Title, fBarLabel, 1000, fmt).Width + Pu(6);
+            vw = string.IsNullOrEmpty(value) ? 0 : g.MeasureString(value, fBarValue, 1000, fmt).Width;
+        }
+
+        // Largeur réellement dessinée de l'état (sans la marge vide de l'icône)
+        float StatusWidth(Graphics g, Tile t, string value) {
+            float gw, lw, vw;
+            StatusParts(g, t, value, out gw, out lw, out vw);
+            return gw + lw + vw - GlyphLead(t.Glyph, fBarGlyph, StringFormat.GenericTypographic);
+        }
+
+        // État de la barre, aligné à gauche dans sa place : [icône] Titre Valeur
+        // (en couleur d'accent), sur la ligne de base de la barre
         void DrawStatus(Graphics g, Tile t, Rectangle r, Color grey) {
             var fmt = StringFormat.GenericTypographic;
-            float gw = string.IsNullOrEmpty(t.Glyph) ? 0 : g.MeasureString(t.Glyph, fBarGlyph, 1000, fmt).Width + Pu(6);
-            float lw = g.MeasureString(t.Title, fBarLabel, 1000, fmt).Width + Pu(6);
-            float vw = g.MeasureString(t.Value, fBarValue, 1000, fmt).Width;
-            float x = r.Right - Px(STATUSPAD) - gw - lw - vw, cy = r.Y + r.Height / 2f;
+            float gw, lw, vw;
+            StatusParts(g, t, t.Value, out gw, out lw, out vw);
+            float x = r.X - GlyphLead(t.Glyph, fBarGlyph, fmt), cy = r.Y + r.Height / 2f;
             float baseY = Baseline(g, fTitle, cy);   // même ligne que les titres du sélecteur
             if (gw > 0)
                 using (var b = new SolidBrush(t.Accent))
@@ -438,17 +471,6 @@ namespace HotkeyDeck {
                 g.DrawString(t.Title, fTitle, b, x + gw, TextTop(fTitle, Baseline(g, fTitle, cy)), fmt);
         }
 
-        // Volume du profil actif, à droite du sélecteur, sur la ligne de base des titres
-        void DrawVolume(Graphics g, Color grey) {
-            foreach (var t in Tiles) {
-                if (t.Row >= 0 || !t.Clickable || !t.On || string.IsNullOrEmpty(t.Sub)) continue;
-                var fmt = StringFormat.GenericTypographic;
-                float baseY = Baseline(g, fTitle, segRect.Y + segRect.Height / 2f);
-                using (var b = new SolidBrush(grey))
-                    g.DrawString(t.Sub, fBarLabel, b, segRect.Right + Px(VOLGAP), TextTop(fBarLabel, baseY), fmt);
-            }
-        }
-
         protected override void OnPaint(PaintEventArgs e) {
             var g = e.Graphics;
             g.Clear(BackColor);
@@ -460,9 +482,11 @@ namespace HotkeyDeck {
             var grey = Color.FromArgb(0x9A, 0x9A, 0x9A);
 
             // Barre du bas : séparée des cartes par un trait
-            if (barRect.Height > 0)
+            if (barRect.Height > 0) {
+                LayoutBar(g);
                 using (var pen = new Pen(Color.FromArgb(0x38, 0x38, 0x38), Math.Max(1, Px(1))))
                     g.DrawLine(pen, barRect.X, lineY, barRect.Right, lineY);
+            }
 
             // Bloc du sélecteur audio, sous ses segments
             if (segRect.Width > 0)
@@ -491,7 +515,6 @@ namespace HotkeyDeck {
                     using (var b = new SolidBrush(t.On ? Color.FromArgb(0xD0, 0xD0, 0xD0) : grey))
                         g.DrawString(t.Sub, fSub, b, new RectangleF(r.X + Pu(4), r.Y + Pu(84), r.Width - Pu(8), Pu(18)), center);
             }
-            DrawVolume(g, grey);
         }
     }
 
@@ -692,7 +715,7 @@ function New-Tile([string]$id, [string]$glyph, [string]$accent) {
 #
 #   [HDR] [Overclock GPU]   [Écran noir] [Instant Replay]
 #   ─────────────────────────────────────────────────────
-#   ( Casque | Enceintes )  -10.0 dB                  Micro actif
+#             ( Casque | Enceintes )    Micro actif
 #
 # HDR et OC se règlent avant de lancer un jeu, selon sa compatibilité ; Écran
 # noir et Instant Replay servent n'importe quand. Un bouton « allumé »
@@ -710,8 +733,8 @@ Add-Tile 'hdr'       'E706' 'FFC83D' 0 0 'HDR'
 Add-Tile 'gpu'       'EC4A' 'FF8C42' 1 0 'Overclock GPU'
 Add-Tile 'black'     'E708' 'B4A7FF' 2 0 'Écran noir'
 Add-Tile 'replay'    'E7C8' '76B900' 3 0 'Instant Replay'
-# Barre du bas (Row = -1) : sélecteur des profils audio (un segment par profil,
-# le volume du profil actif à côté), puis l'état du micro. Le micro est
+# Barre du bas (Row = -1) : sélecteur des profils audio (un segment par profil)
+# puis l'état du micro, centrés ensemble. Le micro est
 # vérifié à chaque appui sur son capteur et à l'ouverture du deck : il n'a pas
 # besoin d'être cliquable
 Add-Tile 'casque'    'E7F6' '4CC2FF' 0 -1 'Casque'
@@ -720,12 +743,11 @@ Add-Tile 'mic'       'E720' '3FB950' 2 -1 'Micro'
 $DeckTiles.mic.Clickable = $false
 $DeckTiles.black.Sub = 'Échap pour quitter'
 
-# Un bouton par profil : celui qui est actif est allumé, avec son volume
+# Un segment par profil : celui qui est actif est allumé
 function Update-DeckAudio {
     foreach ($key in 'casque', 'enceintes') {
         $t = $DeckTiles[$key]
         $t.On = $S.Active -eq $key
-        $t.Sub = if ($t.On) { "$(Fmt $S.Profiles[$key].Cur) dB" } else { '' }
     }
 }
 

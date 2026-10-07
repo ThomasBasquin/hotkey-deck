@@ -39,14 +39,14 @@ Tout tient dans un script PowerShell lancé au démarrage. Le projet est né com
 ```
   [HDR] [Overclock GPU]   [Écran noir] [Instant Replay]
   ─────────────────────────────────────────────────────
-  ( Casque | Enceintes )  -10.0 dB             Micro actif
+            ( Casque | Enceintes )    Micro actif
 ```
 
-Les quatre actions sont sur une ligne, par paires : HDR et Overclock GPU se règlent avant de lancer un jeu (selon qu'il supporte le HDR ou l'OC), Écran noir et Instant Replay servent n'importe quand. La barre du bas regroupe l'audio : un sélecteur segmenté Casque / Enceintes (le profil actif est teinté), le volume du profil actif à côté, et l'état du micro, en lecture seule. Tous ses textes partagent la même ligne de base. Un bouton « allumé » (teinté) indique un état actif. Casque, Enceintes et Overclock GPU laissent le deck ouvert (le bouton se met à jour) ; les autres boutons le referment.
+Les quatre actions sont sur une ligne, par paires : HDR et Overclock GPU se règlent avant de lancer un jeu (selon qu'il supporte le HDR ou l'OC), Écran noir et Instant Replay servent n'importe quand. La barre du bas regroupe l'audio : un sélecteur segmenté Casque / Enceintes (le profil actif est teinté) et l'état du micro, en lecture seule, centrés ensemble. Tous ses textes partagent la même ligne de base. Le volume n'y est pas : l'OSD l'affiche à chaque changement. Un bouton « allumé » (teinté) indique un état actif. Casque, Enceintes et Overclock GPU laissent le deck ouvert (le bouton se met à jour) ; les autres boutons le referment.
 
 | Bouton | Action |
 |--------|--------|
-| Casque, Enceintes | Applique ce profil audio (comme `Ctrl+Alt+F1/F2`) ; le profil actif est allumé avec son volume. Recliquer dessus ne le réapplique pas (ça remettrait le volume par défaut) |
+| Casque, Enceintes | Applique ce profil audio (comme `Ctrl+Alt+F1/F2`) ; le profil actif est allumé. Recliquer dessus ne le réapplique pas (ça remettrait le volume par défaut) |
 | HDR | Active/désactive le HDR Windows sur les écrans qui le supportent (API DisplayConfig) |
 | Écran noir | Comme `Ctrl+Alt+B` |
 | Overclock GPU | Applique le profil Afterburner 2 (OC) ou 1 (stock) via `MSIAfterburner.exe -ProfileN` ; allumé quand l'OC est actif (limite de puissance relevée, lue via NVML) |
