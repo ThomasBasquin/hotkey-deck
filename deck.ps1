@@ -371,7 +371,7 @@ namespace HotkeyDeck {
             var baseBg = Color.FromArgb(0x2B, 0x2B, 0x2B);
             var grey = Color.FromArgb(0x9A, 0x9A, 0x9A);
 
-            // Titres des colonnes (SON, ÉCRAN, JEU)
+            // Titres des colonnes (SON, À TOUT MOMENT, AVANT LE JEU)
             using (var b = new SolidBrush(Color.FromArgb(0x80, 0x80, 0x80)))
                 for (int c = 0; c < Headers.Length; c++)
                     g.DrawString(Headers[c], fHead, b, new RectangleF(Px(PAD + c * (TW + COLGAP)), Px(PAD), Px(TW), Px(HEAD - 8)), center);
@@ -601,15 +601,18 @@ function New-Tile([string]$id, [string]$glyph, [string]$accent) {
     $t
 }
 
-# Une colonne par thème, puis une barre d'état (lecture seule) en bas :
+# Colonnes par moment d'usage, puis une barre d'état (lecture seule) en bas :
 #
-#     SON          ÉCRAN          JEU
-#   [Casque]     [HDR]          [Overclock GPU]
-#   [Enceintes]  [Écran noir]   [Instant Replay]
-#   ──────────────────────────────────────────
-#                  Micro actif
+#     SON          À TOUT MOMENT      AVANT LE JEU
+#   [Casque]     [Écran noir]       [HDR]
+#   [Enceintes]  [Instant Replay]   [Overclock GPU]
+#   ──────────────────────────────────────────────
+#                    Micro actif
 #
-# Les cartes « allumées » (teintées) sont les états actifs.
+# HDR et OC se règlent avant de lancer un jeu, selon sa compatibilité. Instant
+# Replay, l'action urgente en jeu, est sous le centre de l'écran, là où le jeu
+# laisse en général le curseur. Les cartes « allumées » (teintées) sont les
+# états actifs.
 function Add-Tile([string]$id, [string]$glyph, [string]$accent, [int]$col, [int]$row, [string]$title = '') {
     $t = New-Tile $id $glyph $accent
     $t.Col = $col; $t.Row = $row; $t.Title = $title
@@ -619,14 +622,14 @@ function Add-Tile([string]$id, [string]$glyph, [string]$accent, [int]$col, [int]
 }
 
 $deck = New-Object HotkeyDeck.DeckForm
-$deck.Headers = [string[]]@('SON', 'ÉCRAN', 'JEU')
+$deck.Headers = [string[]]@('SON', 'À TOUT MOMENT', 'AVANT LE JEU')
 $DeckTiles = [ordered]@{}
 Add-Tile 'casque'    'E7F6' '4CC2FF' 0 0 'Casque'
 Add-Tile 'enceintes' 'E7F5' '4CC2FF' 0 1 'Enceintes'
-Add-Tile 'hdr'       'E706' 'FFC83D' 1 0 'HDR'
-Add-Tile 'black'     'E708' 'B4A7FF' 1 1 'Écran noir'
-Add-Tile 'gpu'       'EC4A' 'FF8C42' 2 0 'Overclock GPU'
-Add-Tile 'replay'    'E7C8' '76B900' 2 1 'Instant Replay'
+Add-Tile 'black'     'E708' 'B4A7FF' 1 0 'Écran noir'
+Add-Tile 'replay'    'E7C8' '76B900' 1 1 'Instant Replay'
+Add-Tile 'hdr'       'E706' 'FFC83D' 2 0 'HDR'
+Add-Tile 'gpu'       'EC4A' 'FF8C42' 2 1 'Overclock GPU'
 # Barre d'état. Le micro est vérifié à chaque appui sur son capteur et à
 # l'ouverture du deck : il n'a pas besoin d'être cliquable
 Add-Tile 'mic'       'E720' '3FB950' 0 -1 'Micro'
