@@ -78,8 +78,8 @@ namespace HotkeyDeck {
         // Dimensions en pixels à 100 % : carte, écart entre les cartes d'une paire,
         // entre deux paires, marge, barre du bas (hauteur, écart entre le trait et
         // ce qui l'entoure), segment du sélecteur audio (largeur, retrait de la pastille
-        // active), écart entre le sélecteur et l'état
-        const int TW = 160, TH = 128, GAP = 12, PAIRGAP = 22, PAD = 18, BAR = 40, LINE = 18, SW = 140, SEGINSET = 3, STATUSGAP = 140;
+        // active)
+        const int TW = 160, TH = 128, GAP = 12, PAIRGAP = 28, PAD = 18, BAR = 40, LINE = 18, SW = 140, SEGINSET = 3;
 
         public List<Tile> Tiles = new List<Tile>();
         public event Action<string> TileClicked;
@@ -210,10 +210,13 @@ namespace HotkeyDeck {
             int gridBottom = PAD + rows * TH + (rows - 1) * GAP;
             // Trait de séparation à égale distance des cartes et de la barre
             int barTop = gridBottom + 2 * LINE;
-            barRect = new Rectangle(Px(PAD), Px(barTop), Px(w - 2 * PAD), Px(BAR));
+            barRect = new Rectangle(Px(PAD), Px(barTop), Px(w) - 2 * Px(PAD), Px(BAR));
             lineY = (Px(gridBottom) + barRect.Y) / 2;
+            // Colonnes de droite placées en miroir de celles de gauche : l'arrondi à
+            // 125 % décalerait sinon l'espace central d'1 ou 2 px
             foreach (var t in Tiles)
-                rects.Add(t.Row >= 0 ? new Rectangle(Px(ColX(t.Col)), Px(PAD + t.Row * (TH + GAP)), Px(TW), Px(TH)) : Rectangle.Empty);
+                rects.Add(t.Row >= 0 ? new Rectangle(2 * t.Col < cols ? Px(ColX(t.Col)) : Px(w) - Px(ColX(cols - 1 - t.Col)) - Px(TW),
+                    Px(PAD + t.Row * (TH + GAP)), Px(TW), Px(TH)) : Rectangle.Empty);
             if (bar)
                 using (var bmp = new Bitmap(1, 1))
                 using (var g = Graphics.FromImage(bmp)) {
@@ -223,17 +226,21 @@ namespace HotkeyDeck {
             return new Size(Px(w), bar ? Px(barTop + BAR + PAD) : Px(gridBottom + PAD));
         }
 
-        // Barre du bas : sélecteur (tuiles cliquables, accolées en segments) puis
-        // état (non cliquable), centrés ensemble sur la valeur affichée. Refait à
-        // chaque dessin : si le micro change d'état deck ouvert, le groupe se
-        // recentre (quelques px)
+        // Barre du bas : sélecteur (tuiles cliquables, accolées en segments) centré
+        // sous la paire de cartes de gauche, état (non cliquable) sous celle de
+        // droite. Refait à chaque dessin : la largeur de l'état dépend de la valeur
+        // affichée
         void LayoutBar(Graphics g) {
             int nseg = 0;
             Tile status = null;
             foreach (var t in Tiles) if (t.Row < 0) { if (t.Clickable) nseg++; else status = t; }
             int segW = Px(nseg * SW);
             int sw = status == null ? 0 : (int)Math.Ceiling(StatusWidth(g, status, status.Value));
-            int x0 = barRect.X + (barRect.Width - segW - (status == null ? 0 : Px(STATUSGAP) + sw)) / 2;
+            // Sommes bord gauche + bord droit (= 2 × milieu) de chaque paire, celle de
+            // droite en miroir comme les cartes
+            int sumL = Px(ColX(0)) + Px(ColX(1)) + Px(TW);
+            int sumR = 2 * (barRect.X + barRect.Right) - sumL;
+            int x0 = status == null ? barRect.X + (barRect.Width - segW) / 2 : (sumL - segW) / 2;
             segRect = new Rectangle(x0, barRect.Y, segW, barRect.Height);
             int k = 0;
             for (int i = 0; i < Tiles.Count; i++) {
@@ -243,7 +250,7 @@ namespace HotkeyDeck {
                     rects[i] = new Rectangle(x0 + Px(k * SW), barRect.Y, Px((k + 1) * SW) - Px(k * SW), barRect.Height);
                     k++;
                 } else
-                    rects[i] = new Rectangle(segRect.Right + Px(STATUSGAP), barRect.Y, sw, barRect.Height);
+                    rects[i] = new Rectangle((sumR - sw) / 2, barRect.Y, sw, barRect.Height);
             }
         }
 
