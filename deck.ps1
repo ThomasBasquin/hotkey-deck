@@ -453,17 +453,19 @@ namespace HotkeyDeck {
                 g.DrawString(t.Value, fBarValue, b, x + gw + lw, TextTop(fBarValue, baseY), fmt);
         }
 
-        // Fond d'une carte allumée : teinte de l'accent à luminosité et
-        // saturation fixes (OKLCH), les mêmes pour toutes les couleurs. Un
-        // simple mélange avec le gris de la carte éteignait les teintes chaudes
-        // (HDR kaki, OC brun) et pas les froides
-        const double ONL = 0.43, ONC = 0.065;
+        // Dérivés de l'accent : sa teinte seule, à luminosité et saturation fixes
+        // (OKLCH), les mêmes pour toutes les couleurs. Un simple mélange en sRGB
+        // éteignait les teintes chaudes (HDR kaki, OC brun) et pas les froides.
+        // Sert au fond d'une carte allumée et à son contour
+        const double ONL = 0.43, ONC = 0.065, EDGEL = 0.62, EDGEC = 0.10;
         static double Lin(int c) { double v = c / 255.0; return v <= 0.04045 ? v / 12.92 : Math.Pow((v + 0.055) / 1.055, 2.4); }
         static int Gam(double v) {
             v = v <= 0.0031308 ? 12.92 * v : 1.055 * Math.Pow(v, 1 / 2.4) - 0.055;
             return Math.Max(0, Math.Min(255, (int)Math.Round(v * 255)));
         }
-        static Color OnTint(Color a) {
+        static Color OnTint(Color a) { return Tint(a, ONL, ONC); }
+        static Color EdgeTint(Color a) { return Tint(a, EDGEL, EDGEC); }
+        static Color Tint(Color a, double L, double C) {
             // sRGB -> OKLab : seule la teinte (angle a/b) est gardée
             double r = Lin(a.R), g = Lin(a.G), b = Lin(a.B);
             double l = Math.Pow(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b, 1 / 3.0);
@@ -471,11 +473,11 @@ namespace HotkeyDeck {
             double s = Math.Pow(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b, 1 / 3.0);
             double h = Math.Atan2(0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s,
                                   1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s);
-            // OKLCH (ONL, ONC, h) -> sRGB
-            double A = ONC * Math.Cos(h), B = ONC * Math.Sin(h);
-            l = Math.Pow(ONL + 0.3963377774 * A + 0.2158037573 * B, 3);
-            m = Math.Pow(ONL - 0.1055613458 * A - 0.0638541728 * B, 3);
-            s = Math.Pow(ONL - 0.0894841775 * A - 1.2914855480 * B, 3);
+            // OKLCH (L, C, h) -> sRGB
+            double A = C * Math.Cos(h), B = C * Math.Sin(h);
+            l = Math.Pow(L + 0.3963377774 * A + 0.2158037573 * B, 3);
+            m = Math.Pow(L - 0.1055613458 * A - 0.0638541728 * B, 3);
+            s = Math.Pow(L - 0.0894841775 * A - 1.2914855480 * B, 3);
             return Color.FromArgb(Gam(4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s),
                                   Gam(-1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s),
                                   Gam(-0.0041960771 * l - 0.7034186147 * m + 1.7076147010 * s));
@@ -488,7 +490,7 @@ namespace HotkeyDeck {
             using (var path = Round(r, radius))
             using (var br = new SolidBrush(bg)) {
                 g.FillPath(br, path);
-                if (t.On) using (var pen = new Pen(Mix(bg, t.Accent, 0.6), Pu(1.5))) g.DrawPath(pen, path);
+                if (t.On) using (var pen = new Pen(EdgeTint(t.Accent), Pu(1.5))) g.DrawPath(pen, path);
             }
         }
 
@@ -829,8 +831,8 @@ $deck = New-Object HotkeyDeck.DeckForm
 $DeckTiles = [ordered]@{}
 Add-Tile 'hdr'       'E706' 'FFC83D' 0 0 'HDR'
 Add-Tile 'gpu'       'EC4A' 'FF8C42' 1 0 'Overclock GPU'
-Add-Tile 'black'     'E708' 'B4A7FF' 2 0 'Écran noir'
-Add-Tile 'side'      'E7F4' '2EC4B6' 3 0 'Écran Philips'
+Add-Tile 'black'     'E708' 'A492FB' 2 0 'Écran noir'
+Add-Tile 'side'      'E7F4' 'EB8CCD' 3 0 'Écran Philips'
 # Barre du bas (Row = -1) : sélecteur des profils audio (un segment par profil)
 # puis l'état du micro, centrés ensemble. Le micro est
 # vérifié à chaque appui sur son capteur et à l'ouverture du deck : il n'a pas
