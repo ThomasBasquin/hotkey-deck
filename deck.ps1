@@ -9,8 +9,9 @@
 #     plus de ²), pas de hook clavier bas niveau
 #   - températures lues dans la mémoire partagée d'Afterburner, état du GPU via
 #     NVML (lecture seule) : aucun pilote ni accès matériel de notre côté
-#   - seule entrée simulée : Alt+F10 pour l'Instant Replay NVIDIA (pas d'API),
-#     envoyée pendant que le deck a le focus, donc jamais reçue par le jeu
+#   - second écran piloté par DDC/CI via l'API Windows (dxva2), comme le
+#     logiciel des fabricants d'écrans
+#   - aucune entrée clavier ou souris simulée
 #
 # Plein écran : par-dessus les jeux en fenêtré sans bordure / DX12 (cas
 # courant). Un jeu en plein écran exclusif ne laisse rien s'afficher
@@ -22,7 +23,7 @@ $DeckCfg = @{
     Afterburner  = 'C:\Program Files (x86)\MSI Afterburner\MSIAfterburner.exe'
     ProfileStock = 1     # profils Afterburner (Profile1.cfg / Profile2.cfg)
     ProfileOC    = 2
-    ReplayKeys   = @(0xA4, 0x79)   # Alt gauche + F10 (sauvegarde Instant Replay)
+    SideScreen   = 'PHLC0D2'   # identifiant PnP du second écran (Philips 273V5), allumé / éteint par DDC/CI
     # Bandeau d'alerte si le CPU ou le GPU reste au-dessus de TempAlert (°C)
     # pendant TempSustain relevés de suite (un toutes les TempCheckMs) ; il
     # reste affiché jusqu'à être redescendu sous TempReset. En jeu : ~58 °C CPU,
@@ -679,29 +680,90 @@ namespace HotkeyDeck {
         }
     }
 
-    // Raccourci clavier simulé (SendInput) : utilisé seulement pour Alt+F10
-    public static class KeySender {
-        [StructLayout(LayoutKind.Sequential)] struct MOUSEINPUT { public int dx, dy; public uint data, flags, time; public IntPtr extra; }
-        [StructLayout(LayoutKind.Sequential)] struct KEYBDINPUT { public ushort vk, scan; public uint flags, time; public IntPtr extra; }
-        [StructLayout(LayoutKind.Explicit)] struct UNION { [FieldOffset(0)] public MOUSEINPUT mi; [FieldOffset(0)] public KEYBDINPUT ki; }
-        [StructLayout(LayoutKind.Sequential)] struct INPUT { public int type; public UNION u; }
-        [DllImport("user32.dll", SetLastError = true)] static extern uint SendInput(uint n, INPUT[] i, int sz);
-        [DllImport("user32.dll")] static extern uint MapVirtualKey(uint code, uint type);
+    // Alimentation d'un écran par DDC/CI (code VCP 0xD6, comme le bouton
+    // marche/arrêt), via dxva2 : l'écran écoute encore une fois éteint au
+    // bouton tant qu'il reste branché. Écran repéré par son identifiant PnP
+    // (ex. PHLC0D2), Windows le nommant « Generic PnP Monitor ». Chaque échange
+    // DDC prend ~70 ms : lecture et écriture se font hors du thread de l'UI,
+    // State garde la dernière valeur lue
+    public static class MonitorPower {
+        public const int On = 1, Off = 5;   // 5 = éteint comme au bouton (l'écran reste à l'écoute)
+        public static volatile int State = -1;   // 1 = allumé, 2..5 = veille / éteint, -1 = inconnu (écran absent ou muet)
 
-        static INPUT Key(int vk, bool up) {
-            var i = new INPUT { type = 1 };
-            i.u.ki.vk = (ushort)vk;
-            i.u.ki.scan = (ushort)MapVirtualKey((uint)vk, 0);
-            i.u.ki.flags = up ? 2u : 0u;
-            return i;
+        delegate bool MonEnum(IntPtr h, IntPtr dc, IntPtr r, IntPtr d);
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        struct MONITORINFOEX { public int cb; public int l, t, r, b, wl, wt, wr, wb; public uint flags;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string dev; }
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        struct DISPLAY_DEVICE { public int cb;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string name;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string str;
+            public uint flags;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string id;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string key; }
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        struct PHYS { public IntPtr h; [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string desc; }
+        [DllImport("user32.dll")] static extern bool EnumDisplayMonitors(IntPtr dc, IntPtr clip, MonEnum cb, IntPtr d);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern bool GetMonitorInfo(IntPtr h, ref MONITORINFOEX i);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern bool EnumDisplayDevices(string dev, uint i, ref DISPLAY_DEVICE d, uint f);
+        [DllImport("dxva2.dll")] static extern bool GetNumberOfPhysicalMonitorsFromHMONITOR(IntPtr h, out uint n);
+        [DllImport("dxva2.dll")] static extern bool GetPhysicalMonitorsFromHMONITOR(IntPtr h, uint n, [Out] PHYS[] a);
+        [DllImport("dxva2.dll")] static extern bool DestroyPhysicalMonitors(uint n, PHYS[] a);
+        [DllImport("dxva2.dll")] static extern bool GetVCPFeatureAndVCPFeatureReply(IntPtr h, byte code, IntPtr t, out uint cur, out uint max);
+        [DllImport("dxva2.dll")] static extern bool SetVCPFeature(IntPtr h, byte code, uint v);
+
+        static readonly object busy = new object();   // un seul échange DDC à la fois
+
+        // Écran Windows (HMONITOR) dont l'identifiant contient \pnp\
+        static IntPtr Find(string pnp) {
+            var found = IntPtr.Zero;
+            EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, (h, dc, r, d) => {
+                var mi = new MONITORINFOEX(); mi.cb = Marshal.SizeOf(mi);
+                if (!GetMonitorInfo(h, ref mi)) return true;
+                var dd = new DISPLAY_DEVICE(); dd.cb = Marshal.SizeOf(dd);
+                for (uint i = 0; EnumDisplayDevices(mi.dev, i, ref dd, 0); i++)
+                    if (dd.id.IndexOf("\\" + pnp + "\\", StringComparison.OrdinalIgnoreCase) >= 0) { found = h; return false; }
+                return true;
+            }, IntPtr.Zero);
+            return found;
         }
 
-        // Appuie les touches dans l'ordre puis les relâche à l'envers
-        public static bool Chord(int[] vks) {
-            var list = new List<INPUT>();
-            foreach (var k in vks) list.Add(Key(k, false));
-            for (int i = vks.Length - 1; i >= 0; i--) list.Add(Key(vks[i], true));
-            return SendInput((uint)list.Count, list.ToArray(), Marshal.SizeOf(typeof(INPUT))) == list.Count;
+        static bool With(string pnp, Func<IntPtr, bool> f) {
+            lock (busy) {
+                var h = Find(pnp);
+                uint n;
+                if (h == IntPtr.Zero || !GetNumberOfPhysicalMonitorsFromHMONITOR(h, out n) || n == 0) return false;
+                var a = new PHYS[n];
+                if (!GetPhysicalMonitorsFromHMONITOR(h, n, a)) return false;
+                try { return f(a[0].h); } finally { DestroyPhysicalMonitors(n, a); }
+            }
+        }
+
+        static int Read(string pnp) {
+            int s = -1;
+            With(pnp, p => { uint c, m; if (GetVCPFeatureAndVCPFeatureReply(p, 0xD6, IntPtr.Zero, out c, out m)) s = (int)c; return true; });
+            return s;
+        }
+
+        static int gen;   // incrémenté à chaque Set : une lecture lancée avant est périmée
+
+        // Relit State en arrière-plan
+        public static void Refresh(string pnp) {
+            int g = gen;
+            System.Threading.ThreadPool.QueueUserWorkItem(_ => {
+                int s = Read(pnp);
+                if (g == gen) State = s;
+            });
+        }
+
+        // Envoie l'état en arrière-plan ; State le reflète tout de suite (l'écran
+        // ne répond plus pendant qu'il s'allume : relire quelques secondes après)
+        public static void Set(string pnp, int v) {
+            System.Threading.Interlocked.Increment(ref gen);
+            State = v;
+            System.Threading.ThreadPool.QueueUserWorkItem(_ => {
+                if (!With(pnp, p => SetVCPFeature(p, 0xD6, (uint)v))) State = -1;
+            });
         }
     }
 }
@@ -720,12 +782,12 @@ function New-Tile([string]$id, [string]$glyph, [string]$accent) {
 
 # Les quatre actions sur une ligne, par paires, puis la barre audio en bas :
 #
-#   [HDR] [Overclock GPU]   [Écran noir] [Instant Replay]
+#   [HDR] [Overclock GPU]   [Écran noir] [Écran Philips]
 #   ─────────────────────────────────────────────────────
 #             ( Casque | Enceintes )    Micro actif
 #
-# HDR et OC se règlent avant de lancer un jeu, selon sa compatibilité ; Écran
-# noir et Instant Replay servent n'importe quand. Un bouton « allumé »
+# HDR et OC se règlent avant de lancer un jeu, selon sa compatibilité ; les
+# deux boutons d'écran servent n'importe quand. Un bouton « allumé »
 # (teinté) est un état actif.
 function Add-Tile([string]$id, [string]$glyph, [string]$accent, [int]$col, [int]$row, [string]$title = '') {
     $t = New-Tile $id $glyph $accent
@@ -739,7 +801,7 @@ $DeckTiles = [ordered]@{}
 Add-Tile 'hdr'       'E706' 'FFC83D' 0 0 'HDR'
 Add-Tile 'gpu'       'EC4A' 'FF8C42' 1 0 'Overclock GPU'
 Add-Tile 'black'     'E708' 'B4A7FF' 2 0 'Écran noir'
-Add-Tile 'replay'    'E7C8' '76B900' 3 0 'Instant Replay'
+Add-Tile 'side'      'E7F4' '2EC4B6' 3 0 'Écran Philips'
 # Barre du bas (Row = -1) : sélecteur des profils audio (un segment par profil)
 # puis l'état du micro, centrés ensemble. Le micro est
 # vérifié à chaque appui sur son capteur et à l'ouverture du deck : il n'a pas
@@ -749,6 +811,7 @@ Add-Tile 'enceintes' 'E7F5' '4CC2FF' 1 -1 'Enceintes'
 Add-Tile 'mic'       'E720' '3FB950' 2 -1 'Micro'
 $DeckTiles.mic.Clickable = $false
 $DeckTiles.black.Sub = 'Échap pour quitter'
+[HotkeyDeck.MonitorPower]::Refresh($DeckCfg.SideScreen)   # état connu dès la première ouverture
 
 # Un segment par profil : celui qui est actif est allumé
 function Update-DeckAudio {
@@ -789,6 +852,15 @@ function Update-DeckGpu {
     $oc = [HotkeyDeck.Sensors]::GpuOverclocked()
     $t.On = $oc -eq 1
     $t.Sub = if ($oc -lt 0) { 'NVML indisponible' } else { '' }
+}
+
+# Dernier état lu (la lecture DDC, ~70 ms, se fait en arrière-plan) : la
+# carte suit au rafraîchissement suivant du deck
+function Update-DeckSide {
+    $t = $DeckTiles.side
+    $st = [HotkeyDeck.MonitorPower]::State
+    $t.On = $st -eq [HotkeyDeck.MonitorPower]::On
+    $t.Sub = if ($st -lt 0) { 'Ne répond pas' } else { '' }
 }
 
 # ============================================================
@@ -835,21 +907,22 @@ $deckGpuCheck.add_Tick({ Safe {
     if ($deck.Visible) { $deck.Invalidate() }
 }})
 
-# Instant Replay NVIDIA : Alt+F10 envoyé pendant que le deck a le focus (le jeu
-# ne reçoit pas la touche), puis on rend la main au jeu une fois la touche traitée
-$deckReplayDone = New-Object System.Windows.Forms.Timer
-$deckReplayDone.Interval = 200
-$deckReplayDone.add_Tick({ Safe {
-    $deckReplayDone.Stop()
-    $deck.HideDeck($true)
-    Show-Osd '' 'Sauvegarde' 1500 '202020' ([string][char]0xE7C8)
-}})
-
-function Save-Replay {
-    if (-not [HotkeyDeck.KeySender]::Chord([int[]]$DeckCfg.ReplayKeys)) { Log 'Deck : SendInput Alt+F10 refusé' }
-    else { Log 'Deck : Alt+F10 envoyé (Instant Replay)' }
-    $deckReplayDone.Start()
+# Second écran : allumé ↔ éteint (une veille compte comme éteint : on l'allume)
+function Toggle-SideScreen {
+    $on = [HotkeyDeck.MonitorPower]::State -ne [HotkeyDeck.MonitorPower]::On
+    [HotkeyDeck.MonitorPower]::Set($DeckCfg.SideScreen, $(if ($on) { [HotkeyDeck.MonitorPower]::On } else { [HotkeyDeck.MonitorPower]::Off }))
+    Log "Deck : écran $($DeckCfg.SideScreen) $(if ($on) { 'allumé' } else { 'éteint' }) (DDC/CI)"
+    Update-DeckSide   # affichage immédiat, confirmé par la relecture
+    $deckSideCheck.Stop(); $deckSideCheck.Start()
 }
+
+# L'écran ne répond plus au DDC pendant qu'il s'allume : relecture plus tard
+$deckSideCheck = New-Object System.Windows.Forms.Timer
+$deckSideCheck.Interval = 4000
+$deckSideCheck.add_Tick({ Safe {
+    $deckSideCheck.Stop()
+    [HotkeyDeck.MonitorPower]::Refresh($DeckCfg.SideScreen)
+}})
 
 function Invoke-DeckAction([string]$id) {
     switch ($id) {
@@ -862,8 +935,8 @@ function Invoke-DeckAction([string]$id) {
             Update-DeckAudio; $deck.Invalidate()
         }
         'gpu'    { Toggle-GpuProfile; $deck.Invalidate() }
+        'side'   { Toggle-SideScreen; $deck.Invalidate() }
         'hdr'    { $deck.HideDeck($true); Toggle-Hdr }
-        'replay' { Save-Replay }
         'black'  { $deck.HideDeck($false); Show-BlackScreen }
     }
 }
@@ -1006,9 +1079,11 @@ function Open-Deck {
     if ($S.Black.Count) { Log 'Deck : ignoré, écran noir affiché'; return }   # pas par-dessus l'écran noir
     $sw = [Diagnostics.Stopwatch]::StartNew()
     # Une tuile qui échoue ne doit pas empêcher le deck de s'ouvrir
-    foreach ($u in 'Update-DeckAudio', 'Update-DeckMic', 'Update-DeckHdr', 'Update-DeckGpu') {
+    foreach ($u in 'Update-DeckAudio', 'Update-DeckMic', 'Update-DeckHdr', 'Update-DeckGpu', 'Update-DeckSide') {
         try { & $u } catch { Log "Deck : $u en erreur : $($_.Exception.Message)" }
     }
+    # Relit l'état du second écran (sauf changement en cours, pas encore lisible)
+    if (-not $deckSideCheck.Enabled) { [HotkeyDeck.MonitorPower]::Refresh($DeckCfg.SideScreen) }
     $prep = $sw.ElapsedMilliseconds
     $S.DeckNoFocus = $false
     $res = $deck.ShowDeck()
@@ -1045,6 +1120,7 @@ $deckTimer.add_Tick({ Safe {
         $S.DeckNoFocus = $true
     } else { $S.DeckNoFocus = $false }
     Update-DeckMic
+    Update-DeckSide
     $deck.Invalidate()
 }})
 

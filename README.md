@@ -4,9 +4,8 @@ Raccourcis clavier et deck à l'écran pour piloter un PC Windows de jeu, sans s
 
 - **Son** : volume (preamp d'[Equalizer APO](https://sourceforge.net/projects/equalizerapo/) / [Peace](https://sourceforge.net/projects/peace-equalizer-apo-extension/)) avec OSD, mute, bascule casque/enceintes
 - **Micro** : état du HyperX QuadCast S (actif / coupé) à l'OSD et dans le deck
-- **Écran** : écran noir anti burn-in OLED, bascule du HDR Windows
+- **Écran** : écran noir anti burn-in OLED, bascule du HDR Windows, allumage / extinction du second écran (DDC/CI)
 - **GPU** : bascule entre les profils MSI Afterburner stock et overclock, alertes de température CPU/GPU et de ventilateurs
-- **Enregistrement** : sauvegarde de l'Instant Replay NVIDIA
 
 Tout tient dans un script PowerShell lancé au démarrage. Le projet est né comme simple contrôle du preamp de Peace en AutoHotkey (`peace_preamp.ahk`, conservé comme repli).
 
@@ -37,12 +36,12 @@ Tout tient dans un script PowerShell lancé au démarrage. Le projet est né com
 Équivalent d'un Stream Deck affiché par-dessus l'écran. La touche **²** l'ouvre au centre de l'écran de la fenêtre active. On clique sur un bouton (souris seulement : les touches 1–9 ne font rien, pour éviter un déclenchement par réflexe en jeu). Échap, ² ou un clic ailleurs le referment, et le focus revient au jeu.
 
 ```
-  [HDR] [Overclock GPU]   [Écran noir] [Instant Replay]
+  [HDR] [Overclock GPU]   [Écran noir] [Écran Philips]
   ─────────────────────────────────────────────────────
             ( Casque | Enceintes )    Micro actif
 ```
 
-Les quatre actions sont sur une ligne, par paires : HDR et Overclock GPU se règlent avant de lancer un jeu (selon qu'il supporte le HDR ou l'OC), Écran noir et Instant Replay servent n'importe quand. La barre du bas regroupe l'audio : un sélecteur segmenté Casque / Enceintes (le profil actif est teinté) et l'état du micro, en lecture seule, centrés ensemble. Tous ses textes partagent la même ligne de base. Le volume n'y est pas : l'OSD l'affiche à chaque changement. Un bouton « allumé » (teinté) indique un état actif. Casque, Enceintes et Overclock GPU laissent le deck ouvert (le bouton se met à jour) ; les autres boutons le referment.
+Les quatre actions sont sur une ligne, par paires : HDR et Overclock GPU se règlent avant de lancer un jeu (selon qu'il supporte le HDR ou l'OC), les deux boutons d'écran servent n'importe quand. La barre du bas regroupe l'audio : un sélecteur segmenté Casque / Enceintes (le profil actif est teinté) et l'état du micro, en lecture seule, centrés ensemble. Tous ses textes partagent la même ligne de base. Le volume n'y est pas : l'OSD l'affiche à chaque changement. Un bouton « allumé » (teinté) indique un état actif. Casque, Enceintes, Overclock GPU et Écran Philips laissent le deck ouvert (le bouton se met à jour) ; les autres boutons le referment.
 
 | Bouton | Action |
 |--------|--------|
@@ -50,11 +49,11 @@ Les quatre actions sont sur une ligne, par paires : HDR et Overclock GPU se règ
 | HDR | Active/désactive le HDR Windows sur les écrans qui le supportent (API DisplayConfig) |
 | Écran noir | Comme `Ctrl+Alt+B` |
 | Overclock GPU | Applique le profil Afterburner 2 (OC) ou 1 (stock) via `MSIAfterburner.exe -ProfileN` ; allumé quand l'OC est actif (limite de puissance relevée, lue via NVML) |
-| Instant Replay | Envoie `Alt+F10` (sauvegarde Instant Replay NVIDIA) |
+| Écran Philips | Allume ou éteint le second écran (Philips 273V5) par DDC/CI, comme son bouton marche/arrêt ; allumé quand l'écran l'est. L'écran doit rester branché au secteur, DDC/CI activé dans son menu. « Ne répond pas » : écran débranché ou DDC/CI désactivé |
 
 Barre d'état : état du micro (revérifié à chaque ouverture du deck et suivi en direct). Les températures ne sont plus affichées : stables depuis des mois, elles ne sont plus surveillées que par les alertes ci-dessous.
 
-Les numéros de profils Afterburner, le raccourci NVIDIA et les seuils des alertes sont réglables dans `$DeckCfg`, en haut de `deck.ps1`.
+Les numéros de profils Afterburner, l'identifiant du second écran (`SideScreen`) et les seuils des alertes sont réglables dans `$DeckCfg`, en haut de `deck.ps1`.
 
 ### Alertes
 
@@ -72,7 +71,8 @@ La première version (AutoHotkey) était détectée par Easy Anti-Cheat (The Fin
 
 - **Raccourcis via `RegisterHotKey`** (API Windows standard, comme Discord ou OBS). Windows avale les touches réservées : `²` ne tape plus de ², y compris dans les jeux qui l'utilisent pour leur console.
 - **Mesures en lecture seule** : mémoire partagée d'Afterburner, NVML, capture audio du micro.
-- **Une seule entrée simulée** : `Alt+F10` pour l'Instant Replay (NVIDIA n'offre pas d'API), envoyée pendant que le deck a le focus, donc jamais reçue par le jeu.
+- **Aucune entrée simulée** : ni clavier ni souris.
+- **Second écran piloté par DDC/CI** via l'API Windows (`dxva2`), comme le font les logiciels des fabricants d'écrans.
 
 ## Son : fonctionnement
 
@@ -101,7 +101,7 @@ Le micro n'expose pas son état de mute. Le script écoute son interface HID, qu
 
 1. Installer [Equalizer APO](https://sourceforge.net/projects/equalizerapo/) et [Peace](https://sourceforge.net/projects/peace-equalizer-apo-extension/), créer les profils `Casque.peace` et `Enceintes.peace`.
 2. Capturer les modèles : appliquer chaque profil dans Peace et copier `C:\Program Files\EqualizerAPO\config\peace.txt` vers `templates\casque.txt` / `templates\enceintes.txt`.
-3. Pour le deck : [MSI Afterburner](https://www.msi.com/Landing/afterburner) (profils 1 et 2, monitoring des températures CPU/GPU activé) et l'Instant Replay de l'app NVIDIA (`Alt+F10`).
+3. Pour le deck : [MSI Afterburner](https://www.msi.com/Landing/afterburner) (profils 1 et 2, monitoring des températures CPU/GPU activé).
 4. Lancement au démarrage via la tâche planifiée **"Hotkey Deck"** (déclencheur : ouverture de session, niveau d'exécution : le plus élevé — nécessaire pour écrire dans `Program Files` et fermer Peace s'il tourne en admin), action :
 
    ```
