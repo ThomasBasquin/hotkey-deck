@@ -453,9 +453,37 @@ namespace HotkeyDeck {
                 g.DrawString(t.Value, fBarValue, b, x + gw + lw, TextTop(fBarValue, baseY), fmt);
         }
 
+        // Fond d'une carte allumée : teinte de l'accent à luminosité et
+        // saturation fixes (OKLCH), les mêmes pour toutes les couleurs. Un
+        // simple mélange avec le gris de la carte éteignait les teintes chaudes
+        // (HDR kaki, OC brun) et pas les froides
+        const double ONL = 0.43, ONC = 0.065;
+        static double Lin(int c) { double v = c / 255.0; return v <= 0.04045 ? v / 12.92 : Math.Pow((v + 0.055) / 1.055, 2.4); }
+        static int Gam(double v) {
+            v = v <= 0.0031308 ? 12.92 * v : 1.055 * Math.Pow(v, 1 / 2.4) - 0.055;
+            return Math.Max(0, Math.Min(255, (int)Math.Round(v * 255)));
+        }
+        static Color OnTint(Color a) {
+            // sRGB -> OKLab : seule la teinte (angle a/b) est gardée
+            double r = Lin(a.R), g = Lin(a.G), b = Lin(a.B);
+            double l = Math.Pow(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b, 1 / 3.0);
+            double m = Math.Pow(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b, 1 / 3.0);
+            double s = Math.Pow(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b, 1 / 3.0);
+            double h = Math.Atan2(0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s,
+                                  1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s);
+            // OKLCH (ONL, ONC, h) -> sRGB
+            double A = ONC * Math.Cos(h), B = ONC * Math.Sin(h);
+            l = Math.Pow(ONL + 0.3963377774 * A + 0.2158037573 * B, 3);
+            m = Math.Pow(ONL - 0.1055613458 * A - 0.0638541728 * B, 3);
+            s = Math.Pow(ONL - 0.0894841775 * A - 1.2914855480 * B, 3);
+            return Color.FromArgb(Gam(4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s),
+                                  Gam(-1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s),
+                                  Gam(-0.0041960771 * l - 0.7034186147 * m + 1.7076147010 * s));
+        }
+
         // Fond d'une carte : teinté de la couleur d'accent si elle est active, éclairci au survol
         void DrawCard(Graphics g, Tile t, Rectangle r, int i, int radius, Color baseBg) {
-            Color bg = t.On ? Mix(baseBg, t.Accent, 0.28) : baseBg;
+            Color bg = t.On ? OnTint(t.Accent) : baseBg;
             if (t.Clickable && i == hover) bg = Mix(bg, Color.White, i == pressed ? 0.03 : 0.08);
             using (var path = Round(r, radius))
             using (var br = new SolidBrush(bg)) {
