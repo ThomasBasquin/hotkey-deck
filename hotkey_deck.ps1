@@ -408,6 +408,35 @@ namespace HotkeyDeck {
         [DllImport("dwmapi.dll")]
         public static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
 
+        [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+        [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+        [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr h);
+        [DllImport("user32.dll")] public static extern short GetAsyncKeyState(int vk);
+        [DllImport("user32.dll")] static extern bool BringWindowToTop(IntPtr h);
+        [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, IntPtr pid);
+        [DllImport("user32.dll")] static extern bool AttachThreadInput(uint a, uint b, bool attach);
+        [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
+
+        public static bool KeyDown(int vk) { return (GetAsyncKeyState(vk) & 0x8000) != 0; }
+
+        // Prend le premier plan (comme le deck) : le jeu passe en arrière-plan
+        // et cesse de lire souris et clavier. Appel simple, sinon attache
+        // brève à la file d'entrée de la fenêtre active
+        public static bool ForceForeground(IntPtr h) {
+            BringWindowToTop(h);
+            if (SetForegroundWindow(h) && GetForegroundWindow() == h) return true;
+            IntPtr fg = GetForegroundWindow();
+            uint ft = fg != IntPtr.Zero ? GetWindowThreadProcessId(fg, IntPtr.Zero) : 0, me = GetCurrentThreadId();
+            bool att = ft != 0 && ft != me && AttachThreadInput(me, ft, true);
+            try {
+                BringWindowToTop(h);
+                SetForegroundWindow(h);
+            } finally {
+                if (att) AttachThreadInput(me, ft, false);
+            }
+            return GetForegroundWindow() == h;
+        }
+
         // Bascule la sortie par défaut pour les 3 rôles (console, multimédia, communications)
         public static int SetDefaultAudioDevice(string deviceId) {
             var pc = (IPolicyConfig)new CPolicyConfigClient();
@@ -441,6 +470,7 @@ $S = @{
     Active       = 'enceintes'
     Muted        = $false
     Black        = @()
+    BlackPrev    = [IntPtr]::Zero
     OsdHideAt    = [DateTime]::MinValue
 }
 
@@ -855,7 +885,14 @@ function Show-Osd([string]$label, [string]$value, [int]$durationMs = 0, [string]
 # Couvre tous les écrans de noir opaque sans couper le signal vidéo.
 # Se ferme sur Échap (raccourci réservé seulement pendant l'écran noir)
 # ou sur clic gauche.
-function Show-BlackScreen {
+#
+# Sans effet dans le jeu : l'écran noir prend le premier plan (le jeu, en
+# arrière-plan, ne lit plus souris ni clavier) et ne rend la main au jeu
+# qu'une fois la touche ou le bouton relâché, sinon le jeu recevrait le
+# relâchement (menu ouvert, tir).
+# $prev : fenêtre à qui rendre le focus (le jeu) ; par défaut la fenêtre active
+function Show-BlackScreen([IntPtr]$prev = [HotkeyDeck.Native]::GetForegroundWindow()) {
+    $S.BlackPrev = $prev
     foreach ($screen in [System.Windows.Forms.Screen]::AllScreens) {
         $f = New-Object HotkeyDeck.BlackForm
         $f.FormBorderStyle = 'None'
@@ -863,7 +900,8 @@ function Show-BlackScreen {
         $f.ShowInTaskbar   = $false
         $f.BackColor       = [System.Drawing.Color]::Black
         $f.Bounds          = $screen.Bounds
-        $f.add_MouseDown({ param($src, $e) if ($e.Button -eq 'Left') { Safe { Hide-BlackScreen } } })
+        # Au relâchement : l'appui et le relâchement restent tous deux à l'écran noir
+        $f.add_MouseUp({ param($src, $e) if ($e.Button -eq 'Left') { Safe { Hide-BlackScreen } } })
         $f.Show()
         # Le déplacement vers un écran à autre DPI peut redimensionner la
         # fenêtre : on réimpose les dimensions physiques de l'écran.
@@ -873,12 +911,36 @@ function Show-BlackScreen {
     }
     $err = $S.Hk.Register(100, 0, 0x1B)   # Échap
     if ($err) { Log "Échap non réservable pendant l'écran noir (err $err)" }
+    $ok = [HotkeyDeck.Native]::ForceForeground($S.Black[-1].Handle)
+    Log "Écran noir : affiché $(if ($ok) { 'au premier plan' } else { "SANS le premier plan (actif : $([HotkeyDeck.DeckForm]::DescribeForeground()))" })"
+}
+
+# Fermeture demandée au clavier (touche vk encore enfoncée) : on attend
+# qu'elle soit relâchée, au plus 2 s
+$blackRelease = New-Object System.Windows.Forms.Timer
+$blackRelease.Interval = 20
+$blackRelease.add_Tick({ Safe {
+    if ([HotkeyDeck.Native]::KeyDown($S.BlackWaitVk) -and ([DateTime]::Now - $S.BlackWaitFrom).TotalSeconds -lt 2) { return }
+    $blackRelease.Stop()
+    Hide-BlackScreen
+}})
+
+function Hide-BlackScreenAfterRelease([int]$vk) {
+    if ($blackRelease.Enabled) { return }
+    $S.BlackWaitVk = $vk
+    $S.BlackWaitFrom = [DateTime]::Now
+    $blackRelease.Start()
 }
 
 function Hide-BlackScreen {
+    $blackRelease.Stop()
     $S.Hk.Unregister(100)
+    # Focus rendu au jeu avant de fermer : tant que l'écran noir l'a, Windows nous y autorise
+    $p = $S.BlackPrev
+    if ($p -ne [IntPtr]::Zero -and [HotkeyDeck.Native]::IsWindow($p)) { [void][HotkeyDeck.Native]::SetForegroundWindow($p) }
     foreach ($f in $S.Black) { $f.Close(); $f.Dispose() }
     $S.Black = @()
+    $S.BlackPrev = [IntPtr]::Zero
 }
 
 # ============================================================
@@ -1007,8 +1069,8 @@ function On-Hotkey([int]$id) {
         3   { Toggle-Mute }
         4   { Switch-Profile 'enceintes' }
         5   { Switch-Profile 'casque' }
-        6   { if ($S.Black.Count) { Hide-BlackScreen } else { Show-BlackScreen } }
-        100 { Hide-BlackScreen }
+        6   { if ($S.Black.Count) { Hide-BlackScreenAfterRelease 0x42 <# B #> } else { Show-BlackScreen } }
+        100 { Hide-BlackScreenAfterRelease 0x1B }   # Échap
     }
 }
 

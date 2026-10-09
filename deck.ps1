@@ -265,6 +265,7 @@ namespace HotkeyDeck {
         }
         public static string DescribeForeground() { return Describe(GetForegroundWindow()); }
         public bool HasFocus { get { return GetForegroundWindow() == Handle; } }
+        public IntPtr Previous { get { return prevFg; } }   // fenêtre active à l'ouverture (le jeu)
 
         void Say(string m) { var h = Info; if (h != null) h(m); }
 
@@ -937,7 +938,7 @@ function Invoke-DeckAction([string]$id) {
         'gpu'    { Toggle-GpuProfile; $deck.Invalidate() }
         'side'   { Toggle-SideScreen; $deck.Invalidate() }
         'hdr'    { $deck.HideDeck($true); Toggle-Hdr }
-        'black'  { $deck.HideDeck($false); Show-BlackScreen }
+        'black'  { $deck.HideDeck($false); Show-BlackScreen $deck.Previous }
     }
 }
 
