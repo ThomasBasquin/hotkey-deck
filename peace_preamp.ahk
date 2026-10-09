@@ -62,7 +62,7 @@ profiles["enceintes"] := {
     default   : -10.0,
     cur       :   0.0,
     min       : -30.0,
-    max       :  -5.0,   ; = -(boost max de l'EQ enceintes : +5 dB)
+    max       :  -3.0,   ; = -(boost max de l'EQ enceintes : +3 dB)
     step      :   0.5,
     warnZone  :   1.5
 }

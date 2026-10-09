@@ -469,7 +469,7 @@ function Safe([scriptblock]$sb) {
 # Plafond (Max) = -(plus gros boost de l'EQ du profil), pour que le preamp
 # compense toujours le boost et que le signal ne sature jamais :
 #   Casque    : +8 dB (filtre grave) -> -8 dB
-#   Enceintes : +5 dB (filtre grave) -> -5 dB
+#   Enceintes : +3 dB (filtre grave) -> -3 dB
 $S.Profiles = @{
     casque = @{
         Label = 'Casque'; Default = -15.0; Cur = -15.0
@@ -479,7 +479,7 @@ $S.Profiles = @{
     }
     enceintes = @{
         Label = 'Enceintes'; Default = -10.0; Cur = -10.0
-        Min = -30.0; Max = -5.0; Step = 0.5; WarnZone = 1.5
+        Min = -30.0; Max = -3.0; Step = 0.5; WarnZone = 1.5
         PeaceProfile = Join-Path $S.PeaceDir 'Enceintes.peace'
         Template     = Join-Path $S.TemplatesDir 'enceintes.txt'
     }
