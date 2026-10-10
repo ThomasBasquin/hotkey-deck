@@ -471,8 +471,12 @@ namespace HotkeyDeck {
             double l = Math.Pow(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b, 1 / 3.0);
             double m = Math.Pow(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b, 1 / 3.0);
             double s = Math.Pow(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b, 1 / 3.0);
-            double h = Math.Atan2(0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s,
-                                  1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s);
+            double a0 = 1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s;
+            double b0 = 0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s;
+            double h = Math.Atan2(b0, a0);
+            // Jamais plus saturé que l'accent lui-même : un accent neutre (argent)
+            // reste neutre au lieu de prendre une teinte arbitraire
+            C = Math.Min(C, Math.Sqrt(a0 * a0 + b0 * b0));
             // OKLCH (L, C, h) -> sRGB
             double A = C * Math.Cos(h), B = C * Math.Sin(h);
             l = Math.Pow(L + 0.3963377774 * A + 0.2158037573 * B, 3);
@@ -832,7 +836,7 @@ $DeckTiles = [ordered]@{}
 Add-Tile 'hdr'       'E706' 'FFC83D' 0 0 'HDR'
 Add-Tile 'gpu'       'EC4A' 'FF8C42' 1 0 'Overclock GPU'
 Add-Tile 'black'     'E708' 'A492FB' 2 0 'Écran noir'
-Add-Tile 'side'      'E7F4' 'EB8CCD' 3 0 'Écran Philips'
+Add-Tile 'side'      'E7F4' 'C9D1DC' 3 0 'Écran Philips'
 # Barre du bas (Row = -1) : sélecteur des profils audio (un segment par profil)
 # puis l'état du micro, centrés ensemble. Le micro est
 # vérifié à chaque appui sur son capteur et à l'ouverture du deck : il n'a pas
