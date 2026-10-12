@@ -46,6 +46,7 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Drawing.Imaging;
 using System.Drawing.Text;
 using System.IO.MemoryMappedFiles;
 using System.Runtime.InteropServices;
@@ -84,6 +85,16 @@ namespace HotkeyDeck {
         // ce qui l'entoure), largeur d'un segment du sélecteur audio, retrait de
         // l'état de la barre par rapport au bord droit des cartes
         const int TW = 160, TH = 128, GAP = 12, PAIRGAP = 28, PAD = 18, BAR = 40, LINE = 18, SW = 140, RIGHTINSET = 10;
+        // Rayon des cartes : celui des coins de la fenêtre (Windows 11, 8 px à
+        // 100 %), pour que tous les arrondis du deck soient les mêmes
+        const int RADIUS = 8;
+        // Fond « verre » à la Apple : l'écran derrière le deck, flouté (réduit
+        // BLURSCALE fois puis lissé sur BLURRADIUS pixels de l'image réduite),
+        // couleurs ravivées (SATURATE) et voilé de TINT
+        const int BLURSCALE = 6, BLURRADIUS = 3;
+        const float SATURATE = 1.8f;
+        static readonly Color TINT = Color.FromArgb(0x8C, 0x1C, 0x1C, 0x1C);
+        Bitmap backdrop;
 
         public List<Tile> Tiles = new List<Tile>();
         public event Action<string> TileClicked;
@@ -98,7 +109,6 @@ namespace HotkeyDeck {
         Rectangle barRect;
         int lineY;   // trait de séparation, à mi-chemin entre les cartes et la barre
         Rectangle segRect;   // bloc du sélecteur audio (boutons de la barre, accolés)
-        readonly Timer fade = new Timer { Interval = 15 };
         IntPtr prevFg;
         float scale = 1f;
         int hover = -1, pressed = -1;
@@ -113,11 +123,6 @@ namespace HotkeyDeck {
             TopMost = true;
             BackColor = Color.FromArgb(0x1C, 0x1C, 0x1C);
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer, true);
-            fade.Tick += (s, e) => {
-                double o = Opacity + 0.25;
-                if (o >= 1) { o = 1; fade.Stop(); }   // opaque : lisible quel que soit le fond
-                Opacity = o;
-            };
         }
 
         protected override CreateParams CreateParams {
@@ -281,15 +286,14 @@ namespace HotkeyDeck {
             var sz = LayoutTiles();
             hover = pressed = -1;
 
-            Opacity = 0;
+            var at = new Rectangle(scr.X + (scr.Width - sz.Width) / 2, scr.Y + (scr.Height - sz.Height) / 2, sz.Width, sz.Height);
+            if (!Visible) CaptureBackdrop(at);   // avant d'afficher : le deck ne doit pas s'y voir
             if (!Visible) Show();
-            SetWindowPos(Handle, new IntPtr(-1), scr.X + (scr.Width - sz.Width) / 2, scr.Y + (scr.Height - sz.Height) / 2,
-                         sz.Width, sz.Height, 0x0040 /* SWP_SHOWWINDOW */);
+            SetWindowPos(Handle, new IntPtr(-1), at.X, at.Y, at.Width, at.Height, 0x0040 /* SWP_SHOWWINDOW */);
             shownAt = Environment.TickCount;
             regrabs = 0;
             ForceForeground();
             Invalidate();
-            fade.Start();
             return (GetForegroundWindow() == Handle ? "au premier plan (" + fgMethod + ")" : "SANS le premier plan (actif : " + DescribeForeground() + ")")
                  + (Exclusive ? ", plein écran exclusif → autre écran" : "")
                  + ", " + scr.Width + "x" + scr.Height + " à " + (int)(scale * 100) + " %";
@@ -323,7 +327,6 @@ namespace HotkeyDeck {
         public void HideDeck(bool restore) { HideDeck(restore, "action"); }
         public void HideDeck(bool restore, string reason) {
             if (!Visible) return;
-            fade.Stop();
             Hide();
             Say("fermé (" + reason + ") après " + (Environment.TickCount - shownAt) + " ms");
             if (restore && prevFg != IntPtr.Zero && IsWindow(prevFg)) SetForegroundWindow(prevFg);
@@ -498,7 +501,7 @@ namespace HotkeyDeck {
         // sinon titre en gris, blanc au survol (une pastille de survol dessinerait
         // une forme qui ne colle pas au bloc commun) ; contenu centré : [icône] Titre
         void DrawSegment(Graphics g, Tile t, Rectangle r, int i, Color baseBg, Color grey) {
-            if (t.On) DrawCard(g, t, r, i, Pu(10), baseBg, Color.Empty);
+            if (t.On) DrawCard(g, t, r, i, Px(RADIUS), baseBg, Color.Empty);
             var fmt = StringFormat.GenericTypographic;
             float gw = g.MeasureString(t.Glyph, fBarGlyph, 1000, fmt).Width + Pu(7);
             float lw = g.MeasureString(t.Title, fTitle, 1000, fmt).Width;
@@ -510,31 +513,89 @@ namespace HotkeyDeck {
                 g.DrawString(t.Title, fTitle, b, x + gw, TextTop(fTitle, Baseline(g, fTitle, cy)), fmt);
         }
 
-        protected override void OnPaint(PaintEventArgs e) {
-            var g = e.Graphics;
+        // Capture l'écran sous la future place du deck (avant de l'afficher) et
+        // en fait le fond flouté : réduction, flou sur l'image réduite, puis
+        // agrandissement lissé avec les couleurs ravivées
+        void CaptureBackdrop(Rectangle area) {
+            if (backdrop != null) { backdrop.Dispose(); backdrop = null; }
+            try {
+                int sw = Math.Max(1, area.Width / BLURSCALE), sh = Math.Max(1, area.Height / BLURSCALE);
+                using (var shot = new Bitmap(area.Width, area.Height, PixelFormat.Format32bppRgb))
+                using (var small = new Bitmap(sw, sh, PixelFormat.Format32bppRgb)) {
+                    using (var g = Graphics.FromImage(shot)) g.CopyFromScreen(area.Location, Point.Empty, area.Size);
+                    using (var g = Graphics.FromImage(small)) {
+                        g.InterpolationMode = InterpolationMode.HighQualityBilinear;   // moyenne des pixels réduits
+                        g.DrawImage(shot, new Rectangle(0, 0, sw, sh));
+                    }
+                    for (int pass = 0; pass < 3; pass++) BoxBlur(small, BLURRADIUS);   // 3 passes ≈ flou gaussien
+                    float s = SATURATE, r = (1 - s) * 0.2126f, gr = (1 - s) * 0.7152f, b = (1 - s) * 0.0722f;
+                    var sat = new ColorMatrix(new[] {
+                        new[] { r + s, r, r, 0f, 0f }, new[] { gr, gr + s, gr, 0f, 0f }, new[] { b, b, b + s, 0f, 0f },
+                        new[] { 0f, 0f, 0f, 1f, 0f }, new[] { 0f, 0f, 0f, 0f, 1f } });
+                    backdrop = new Bitmap(area.Width, area.Height, PixelFormat.Format32bppRgb);
+                    using (var g = Graphics.FromImage(backdrop))
+                    using (var ia = new ImageAttributes()) {
+                        ia.SetColorMatrix(sat);
+                        ia.SetWrapMode(WrapMode.TileFlipXY);   // sans quoi les bords s'assombrissent
+                        g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                        g.PixelOffsetMode = PixelOffsetMode.Half;
+                        g.DrawImage(small, new Rectangle(0, 0, area.Width, area.Height), 0, 0, sw, sh, GraphicsUnit.Pixel, ia);
+                    }
+                }
+            } catch (Exception ex) { Say("fond flouté indisponible : " + ex.Message); }
+        }
+
+        // Flou par moyenne glissante (horizontal puis vertical), bords répétés
+        static void BoxBlur(Bitmap bmp, int rad) {
+            int w = bmp.Width, h = bmp.Height;
+            var data = bmp.LockBits(new Rectangle(0, 0, w, h), ImageLockMode.ReadWrite, PixelFormat.Format32bppRgb);
+            var px = new int[w * h];
+            Marshal.Copy(data.Scan0, px, 0, px.Length);
+            var tmp = new int[px.Length];
+            for (int dir = 0; dir < 2; dir++) {
+                int n = dir == 0 ? w : h, lines = dir == 0 ? h : w;
+                for (int l = 0; l < lines; l++)
+                    for (int i = 0; i < n; i++) {
+                        int sr = 0, sg = 0, sb = 0;
+                        for (int k = -rad; k <= rad; k++) {
+                            int j = Math.Min(n - 1, Math.Max(0, i + k));
+                            int c = dir == 0 ? px[l * w + j] : px[j * w + l];
+                            sr += (c >> 16) & 0xFF; sg += (c >> 8) & 0xFF; sb += c & 0xFF;
+                        }
+                        int cnt = 2 * rad + 1, idx = dir == 0 ? l * w + i : i * w + l;
+                        tmp[idx] = (0xFF << 24) | ((sr / cnt) << 16) | ((sg / cnt) << 8) | (sb / cnt);
+                    }
+                var t = px; px = tmp; tmp = t;
+            }
+            Marshal.Copy(px, 0, data.Scan0, px.Length);
+            bmp.UnlockBits(data);
+        }
+
+        protected override void OnPaint(PaintEventArgs e) { Draw(e.Graphics); }
+
+        // Fond flouté et voilé, puis les cartes en voile blanc, sans contour (comme
+        // les modules du Centre de contrôle d'Apple) : tout le deck laisse
+        // deviner ce qu'il y a derrière
+        void Draw(Graphics g) {
             g.Clear(BackColor);
+            if (backdrop != null) g.DrawImage(backdrop, new Rectangle(Point.Empty, backdrop.Size));
+            using (var b = new SolidBrush(TINT)) g.FillRectangle(b, ClientRectangle);
             if (fTitle == null) return;
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
             var center = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center, Trimming = StringTrimming.EllipsisCharacter, FormatFlags = StringFormatFlags.NoWrap };
-            var baseBg = Color.FromArgb(0x2B, 0x2B, 0x2B);
+            var baseBg = Color.FromArgb(0x14, Color.White);
             var grey = Color.FromArgb(0x9A, 0x9A, 0x9A);
-            var edge = Color.FromArgb(0x3A, 0x3A, 0x3A);
 
             // Barre du bas : séparée des cartes par un trait
             if (barRect.Height > 0) {
                 LayoutBar(g);
-                using (var pen = new Pen(Color.FromArgb(0x38, 0x38, 0x38), Math.Max(1, Px(1))))
+                using (var pen = new Pen(Color.FromArgb(0x18, Color.White), Math.Max(1, Px(1))))
                     g.DrawLine(pen, barRect.X, lineY, barRect.Right, lineY);
             }
 
-            // Bloc du sélecteur audio, sous ses segments, avec le contour des cartes
-            // éteintes : sans lui, son bord se fond dans le fond et le segment
-            // actif, cerné de son accent, paraît déborder
-            if (segRect.Width > 0) {
-                FillRound(g, segRect, Pu(10), baseBg);
-                DrawEdge(g, segRect, Pu(10), edge);
-            }
+            // Bloc du sélecteur audio, sous ses segments
+            if (segRect.Width > 0) FillRound(g, segRect, Px(RADIUS), baseBg);
 
             for (int i = 0; i < Tiles.Count && i < rects.Count; i++) {
                 var t = Tiles[i];
@@ -546,7 +607,7 @@ namespace HotkeyDeck {
                     continue;
                 }
 
-                DrawCard(g, t, r, i, Px(12), baseBg, edge);
+                DrawCard(g, t, r, i, Px(RADIUS), baseBg, Color.Empty);
 
                 // Icône et titre à la même place sur toutes les cartes ; le
                 // sous-titre éventuel s'ajoute dessous sans les décaler
