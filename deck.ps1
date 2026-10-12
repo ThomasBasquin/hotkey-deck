@@ -1,8 +1,9 @@
 ﻿# Deck — "Stream Deck" à l'écran, chargé par hotkey_deck.ps1 (dot-source)
 #
 # La touche ² (AZERTY, à gauche de 1) ouvre une grille de
-# boutons au centre de l'écran du jeu / de la fenêtre active ; un clic lance
-# une action (souris seulement). Échap, ² ou un clic ailleurs referme.
+# boutons au centre de l'écran du jeu / de la fenêtre active ; un clic, ou les
+# touches 1 à 4 pour les cartes, lance une action. Échap, ² ou un clic ailleurs
+# referme.
 #
 # Compatible anti-cheat, comme le reste du script :
 #   - touche ² réservée via RegisterHotKey (Windows l'avale : elle ne tape
@@ -55,6 +56,8 @@ namespace HotkeyDeck {
         public string Id, Glyph = "", Title = "", Sub = "";
         public Color Accent = Color.FromArgb(0x4C, 0xC2, 0xFF);
         public bool On;              // état actif : carte « allumée » (teintée de la couleur d'accent)
+        public Color OnColor = Color.Empty;   // carte allumée : contour et fond translucide de cette couleur (Empty : l'accent)
+        public double OnAlpha = 0.14;         // opacité de ce fond
         public bool Clickable = true;
         public int Col, Row;         // place dans la grille de boutons ; Row = -1 : barre d'état
         public string Value = "";    // barre d'état : valeur affichée après le titre
@@ -78,9 +81,10 @@ namespace HotkeyDeck {
 
         // Dimensions en pixels à 100 % : carte, écart entre les cartes d'une paire,
         // entre deux paires, marge, barre du bas (hauteur, écart entre le trait et
-        // ce qui l'entoure), segment du sélecteur audio (largeur, retrait de la pastille
-        // active)
-        const int TW = 160, TH = 128, GAP = 12, PAIRGAP = 28, PAD = 18, BAR = 40, LINE = 18, SW = 140, SEGINSET = 3;
+        // ce qui l'entoure), largeur d'un segment du sélecteur audio, côté de la
+        // pastille de touche d'une carte (pair : son chiffre tombe pile au milieu),
+        // retrait de l'état de la barre par rapport au bord droit des cartes
+        const int TW = 160, TH = 128, GAP = 12, PAIRGAP = 28, PAD = 18, BAR = 40, LINE = 18, SW = 140, KEY = 18, RIGHTINSET = 4;
 
         public List<Tile> Tiles = new List<Tile>();
         public event Action<string> TileClicked;
@@ -99,7 +103,8 @@ namespace HotkeyDeck {
         IntPtr prevFg;
         float scale = 1f;
         int hover = -1, pressed = -1;
-        Font fGlyph, fTitle, fSub, fBarLabel, fBarValue, fBarGlyph;
+        bool keyRepeat;   // dernier WM_KEYDOWN : touche déjà enfoncée (répétition, ou tenue avant l'ouverture)
+        Font fGlyph, fTitle, fSub, fBadge, fBarLabel, fBarValue, fBarGlyph;
 
         public DeckForm() {
             FormBorderStyle = FormBorderStyle.None;
@@ -111,7 +116,7 @@ namespace HotkeyDeck {
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer, true);
             fade.Tick += (s, e) => {
                 double o = Opacity + 0.25;
-                if (o >= 0.97) { o = 0.97; fade.Stop(); }
+                if (o >= 1) { o = 1; fade.Stop(); }   // opaque : lisible quel que soit le fond
                 Opacity = o;
             };
         }
@@ -138,6 +143,7 @@ namespace HotkeyDeck {
             // déclenche pas quand le premier plan a été pris via AttachThreadInput
             if (m.Msg == 0x0006 /* WM_ACTIVATE */ && Visible && (m.WParam.ToInt64() & 0xFFFF) == 0 /* WA_INACTIVE */)
                 BeginInvoke(new Action(() => OnFocusLost(true)));
+            if (m.Msg == 0x0100 /* WM_KEYDOWN */) keyRepeat = (m.LParam.ToInt64() & 0x40000000) != 0;
             base.WndProc(ref m);
         }
 
@@ -183,10 +189,11 @@ namespace HotkeyDeck {
         }
 
         void BuildFonts() {
-            foreach (var f in new[] { fGlyph, fTitle, fSub, fBarLabel, fBarValue, fBarGlyph }) if (f != null) f.Dispose();
+            foreach (var f in new[] { fGlyph, fTitle, fSub, fBadge, fBarLabel, fBarValue, fBarGlyph }) if (f != null) f.Dispose();
             fGlyph     = new Font("Segoe Fluent Icons", Pu(30), GraphicsUnit.Pixel);
             fTitle     = new Font("Segoe UI Semibold", Pu(14), GraphicsUnit.Pixel);
             fSub       = new Font("Segoe UI", Pu(11.5), GraphicsUnit.Pixel);
+            fBadge     = new Font("Segoe UI Semibold", Pu(10), GraphicsUnit.Pixel);
             fBarLabel  = new Font("Segoe UI", Pu(12.5), GraphicsUnit.Pixel);
             fBarValue  = new Font("Segoe UI Semibold", Pu(16), GraphicsUnit.Pixel);
             fBarGlyph  = new Font("Segoe Fluent Icons", Pu(17), GraphicsUnit.Pixel);
@@ -227,31 +234,26 @@ namespace HotkeyDeck {
             return new Size(Px(w), bar ? Px(barTop + BAR + PAD) : Px(gridBottom + PAD));
         }
 
-        // Barre du bas : sélecteur (tuiles cliquables, accolées en segments) centré
-        // sous la paire de cartes de gauche, état (non cliquable) sous celle de
-        // droite. Refait à chaque dessin : la largeur de l'état dépend de la valeur
-        // affichée
+        // Barre du bas : sélecteur (tuiles cliquables, accolées en segments) aligné
+        // sur le bord gauche des cartes, état (non cliquable) sur leur bord droit.
+        // Refait à chaque dessin : la largeur de l'état dépend de la valeur affichée
         void LayoutBar(Graphics g) {
             int nseg = 0;
             Tile status = null;
             foreach (var t in Tiles) if (t.Row < 0) { if (t.Clickable) nseg++; else status = t; }
-            int segW = Px(nseg * SW);
-            int sw = status == null ? 0 : (int)Math.Ceiling(StatusWidth(g, status, status.Value));
-            // Sommes bord gauche + bord droit (= 2 × milieu) de chaque paire, celle de
-            // droite en miroir comme les cartes
-            int sumL = Px(ColX(0)) + Px(ColX(1)) + Px(TW);
-            int sumR = 2 * (barRect.X + barRect.Right) - sumL;
-            int x0 = status == null ? barRect.X + (barRect.Width - segW) / 2 : (sumL - segW) / 2;
-            segRect = new Rectangle(x0, barRect.Y, segW, barRect.Height);
+            // L'état finit un peu en retrait du bord des cartes (RIGHTINSET), jamais
+            // au-delà : le lissage cale le texte sur la grille des pixels à ±1 px près
+            int sw = status == null ? 0 : (int)Math.Ceiling(StatusWidth(g, status, status.Value)) + Px(RIGHTINSET);
+            segRect = new Rectangle(barRect.X, barRect.Y, Px(nseg * SW), barRect.Height);
             int k = 0;
             for (int i = 0; i < Tiles.Count; i++) {
                 var t = Tiles[i];
                 if (t.Row >= 0) continue;
                 if (t.Clickable) {
-                    rects[i] = new Rectangle(x0 + Px(k * SW), barRect.Y, Px((k + 1) * SW) - Px(k * SW), barRect.Height);
+                    rects[i] = new Rectangle(barRect.X + Px(k * SW), barRect.Y, Px((k + 1) * SW) - Px(k * SW), barRect.Height);
                     k++;
                 } else
-                    rects[i] = new Rectangle((sumR - sw) / 2, barRect.Y, sw, barRect.Height);
+                    rects[i] = new Rectangle(barRect.Right - sw, barRect.Y, sw, barRect.Height);
             }
         }
 
@@ -329,10 +331,22 @@ namespace HotkeyDeck {
             if (restore && prevFg != IntPtr.Zero && IsWindow(prevFg)) SetForegroundWindow(prevFg);
         }
 
-        // Souris seulement : aucune touche ne lance d'action (un 1 tapé par
-        // réflexe en jeu, pour changer d'arme, déclencherait un bouton)
+        // Touches 1 à 4 (rangée du haut ou pavé numérique) : carte de la colonne
+        // correspondante, comme un clic. Sur un clavier AZERTY, la touche &/1 envoie
+        // elle aussi le code de touche 1, avec ou sans Maj : & é " ' marchent donc
+        // tels quels. Pas de répétition : une touche tenue ne bascule pas en boucle
         protected override void OnKeyDown(KeyEventArgs e) {
-            if (e.KeyCode == Keys.Escape) HideDeck(true, "Échap");
+            if (e.KeyCode == Keys.Escape) { HideDeck(true, "Échap"); return; }
+            if (keyRepeat || e.Control || e.Alt) return;
+            int col = e.KeyCode >= Keys.D1 && e.KeyCode <= Keys.D4 ? e.KeyCode - Keys.D1
+                    : e.KeyCode >= Keys.NumPad1 && e.KeyCode <= Keys.NumPad4 ? e.KeyCode - Keys.NumPad1 : -1;
+            if (col < 0) return;
+            for (int i = 0; i < Tiles.Count; i++)
+                if (Tiles[i].Row == 0 && Tiles[i].Col == col) {
+                    Say("touche " + (col + 1) + " → " + Tiles[i].Id);
+                    Fire(i);
+                    return;
+                }
         }
 
         void Fire(int i) {
@@ -361,13 +375,9 @@ namespace HotkeyDeck {
             if (e.Button == MouseButtons.Left && p >= 0 && p == HitTest(e.Location)) Fire(p);
         }
 
-        static Color Mix(Color a, Color b, double t) {
-            return Color.FromArgb((int)(a.R + (b.R - a.R) * t), (int)(a.G + (b.G - a.G) * t), (int)(a.B + (b.B - a.B) * t));
-        }
-
-        static GraphicsPath Round(Rectangle r, int rad) {
+        static GraphicsPath Round(RectangleF r, float rad) {
             var p = new GraphicsPath();
-            int d = rad * 2;
+            float d = rad * 2;
             p.AddArc(r.X, r.Y, d, d, 180, 90);
             p.AddArc(r.Right - d, r.Y, d, d, 270, 90);
             p.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
@@ -429,11 +439,20 @@ namespace HotkeyDeck {
             vw = string.IsNullOrEmpty(value) ? 0 : g.MeasureString(value, fBarValue, 1000, fmt).Width;
         }
 
-        // Largeur réellement dessinée de l'état (sans la marge vide de l'icône)
+        // Largeur réellement dessinée de l'état (sans la marge vide de l'icône ni
+        // celle après la dernière lettre de la valeur) : l'état s'aligne à droite
+        // sur le bord des cartes
         float StatusWidth(Graphics g, Tile t, string value) {
+            var fmt = StringFormat.GenericTypographic;
             float gw, lw, vw;
             StatusParts(g, t, value, out gw, out lw, out vw);
-            return gw + lw + vw - GlyphLead(t.Glyph, fBarGlyph, StringFormat.GenericTypographic);
+            float trail = 0;
+            if (!string.IsNullOrEmpty(value))
+                using (var p = new GraphicsPath()) {
+                    p.AddString(value, fBarValue.FontFamily, (int)fBarValue.Style, fBarValue.Size, PointF.Empty, fmt);
+                    trail = Math.Max(0, vw - p.GetBounds().Right);
+                }
+            return gw + lw + vw - trail - GlyphLead(t.Glyph, fBarGlyph, fmt);
         }
 
         // État de la barre, aligné à gauche dans sa place : [icône] Titre Valeur
@@ -453,56 +472,48 @@ namespace HotkeyDeck {
                 g.DrawString(t.Value, fBarValue, b, x + gw + lw, TextTop(fBarValue, baseY), fmt);
         }
 
-        // Dérivés de l'accent : sa teinte seule, à luminosité et saturation fixes
-        // (OKLCH), les mêmes pour toutes les couleurs. Un simple mélange en sRGB
-        // éteignait les teintes chaudes (HDR kaki, OC brun) et pas les froides.
-        // Sert au fond d'une carte allumée et à son contour
-        const double ONL = 0.43, ONC = 0.065, EDGEL = 0.62, EDGEC = 0.10;
-        static double Lin(int c) { double v = c / 255.0; return v <= 0.04045 ? v / 12.92 : Math.Pow((v + 0.055) / 1.055, 2.4); }
-        static int Gam(double v) {
-            v = v <= 0.0031308 ? 12.92 * v : 1.055 * Math.Pow(v, 1 / 2.4) - 0.055;
-            return Math.Max(0, Math.Min(255, (int)Math.Round(v * 255)));
-        }
-        static Color OnTint(Color a) { return Tint(a, ONL, ONC); }
-        static Color EdgeTint(Color a) { return Tint(a, EDGEL, EDGEC); }
-        static Color Tint(Color a, double L, double C) {
-            // sRGB -> OKLab : seule la teinte (angle a/b) est gardée
-            double r = Lin(a.R), g = Lin(a.G), b = Lin(a.B);
-            double l = Math.Pow(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b, 1 / 3.0);
-            double m = Math.Pow(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b, 1 / 3.0);
-            double s = Math.Pow(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b, 1 / 3.0);
-            double a0 = 1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s;
-            double b0 = 0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s;
-            double h = Math.Atan2(b0, a0);
-            // Jamais plus saturé que l'accent lui-même : un accent neutre (argent)
-            // reste neutre au lieu de prendre une teinte arbitraire
-            C = Math.Min(C, Math.Sqrt(a0 * a0 + b0 * b0));
-            // OKLCH (L, C, h) -> sRGB
-            double A = C * Math.Cos(h), B = C * Math.Sin(h);
-            l = Math.Pow(L + 0.3963377774 * A + 0.2158037573 * B, 3);
-            m = Math.Pow(L - 0.1055613458 * A - 0.0638541728 * B, 3);
-            s = Math.Pow(L - 0.0894841775 * A - 1.2914855480 * B, 3);
-            return Color.FromArgb(Gam(4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s),
-                                  Gam(-1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s),
-                                  Gam(-0.0041960771 * l - 0.7034186147 * m + 1.7076147010 * s));
+        // Carte : fond gris, contour discret (idleEdge, Empty : sans contour) ;
+        // allumée, fond translucide de sa couleur et contour plein de cette
+        // couleur ; éclaircie au survol
+        void DrawCard(Graphics g, Tile t, Rectangle r, int i, int radius, Color baseBg, Color idleEdge) {
+            Color on = t.OnColor.IsEmpty ? t.Accent : t.OnColor;
+            FillRound(g, r, radius, t.On ? Color.FromArgb((int)Math.Round(t.OnAlpha * 255), on) : baseBg);
+            if (t.Clickable && i == hover) FillRound(g, r, radius, Color.FromArgb(i == pressed ? 8 : 20, Color.White));
+            Color edge = t.On ? on : idleEdge;
+            if (!edge.IsEmpty) DrawEdge(g, r, radius, edge);
         }
 
-        // Fond d'une carte : teinté de la couleur d'accent si elle est active, éclairci au survol
-        void DrawCard(Graphics g, Tile t, Rectangle r, int i, int radius, Color baseBg) {
-            Color bg = t.On ? OnTint(t.Accent) : baseBg;
-            if (t.Clickable && i == hover) bg = Mix(bg, Color.White, i == pressed ? 0.03 : 0.08);
+        // Contour d'un pixel posé juste à l'intérieur du bord
+        void DrawEdge(Graphics g, Rectangle r, int radius, Color c) {
+            float w = Math.Max(1, Px(1)), h = w / 2;
+            using (var path = Round(new RectangleF(r.X + h, r.Y + h, r.Width - w, r.Height - w), radius - h))
+            using (var pen = new Pen(c, w)) g.DrawPath(pen, path);
+        }
+
+        // Rectangle arrondi plein
+        static void FillRound(Graphics g, Rectangle r, int radius, Color c) {
             using (var path = Round(r, radius))
-            using (var br = new SolidBrush(bg)) {
-                g.FillPath(br, path);
-                if (t.On) using (var pen = new Pen(EdgeTint(t.Accent), Pu(1.5))) g.DrawPath(pen, path);
-            }
+            using (var br = new SolidBrush(c)) g.FillPath(br, path);
         }
 
-        // Segment du sélecteur audio : pastille teintée (en retrait dans le bloc)
-        // s'il est actif, éclaircie au survol ; contenu centré : [icône] Titre
-        void DrawSegment(Graphics g, Tile t, Rectangle r, int i, Color baseBg) {
-            if (t.On || i == hover)
-                DrawCard(g, t, Rectangle.Inflate(r, -Px(SEGINSET), -Px(SEGINSET)), i, Pu(10) - Px(SEGINSET), baseBg);
+        // Texte centré sur son encre et non sur sa boîte, qui laisse plus de vide
+        // au-dessus qu'en dessous : chiffre des pastilles de touche
+        static void DrawInkCentered(Graphics g, string s, Font f, Brush b, Rectangle r) {
+            var fmt = StringFormat.GenericTypographic;
+            RectangleF ink;
+            using (var p = new GraphicsPath()) {
+                p.AddString(s, f.FontFamily, (int)f.Style, f.Size, PointF.Empty, fmt);
+                ink = p.GetBounds();
+            }
+            g.DrawString(s, f, b, (float)Math.Round(r.X + (r.Width - ink.Width) / 2 - ink.X),
+                                  (float)Math.Round(r.Y + (r.Height - ink.Height) / 2 - ink.Y), fmt);
+        }
+
+        // Segment du sélecteur audio : teinté sur toute sa surface s'il est actif ;
+        // sinon titre en gris, blanc au survol (une pastille de survol dessinerait
+        // une forme qui ne colle pas au bloc commun) ; contenu centré : [icône] Titre
+        void DrawSegment(Graphics g, Tile t, Rectangle r, int i, Color baseBg, Color grey) {
+            if (t.On) DrawCard(g, t, r, i, Pu(10), baseBg, Color.Empty);
             var fmt = StringFormat.GenericTypographic;
             float gw = g.MeasureString(t.Glyph, fBarGlyph, 1000, fmt).Width + Pu(7);
             float lw = g.MeasureString(t.Title, fTitle, 1000, fmt).Width;
@@ -510,7 +521,7 @@ namespace HotkeyDeck {
             float x = r.X + (r.Width - gw - lw - lead) / 2, cy = r.Y + r.Height / 2f;
             using (var b = new SolidBrush(t.Accent))
                 g.DrawString(t.Glyph, fBarGlyph, b, x, cy - fBarGlyph.GetHeight(g) / 2, fmt);
-            using (var b = new SolidBrush(Color.White))
+            using (var b = new SolidBrush(t.On || i == hover ? Color.White : grey))
                 g.DrawString(t.Title, fTitle, b, x + gw, TextTop(fTitle, Baseline(g, fTitle, cy)), fmt);
         }
 
@@ -523,6 +534,7 @@ namespace HotkeyDeck {
             var center = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center, Trimming = StringTrimming.EllipsisCharacter, FormatFlags = StringFormatFlags.NoWrap };
             var baseBg = Color.FromArgb(0x2B, 0x2B, 0x2B);
             var grey = Color.FromArgb(0x9A, 0x9A, 0x9A);
+            var edge = Color.FromArgb(0x3A, 0x3A, 0x3A);
 
             // Barre du bas : séparée des cartes par un trait
             if (barRect.Height > 0) {
@@ -532,31 +544,37 @@ namespace HotkeyDeck {
             }
 
             // Bloc du sélecteur audio, sous ses segments
-            if (segRect.Width > 0)
-                using (var path = Round(segRect, Pu(10)))
-                using (var br = new SolidBrush(baseBg)) g.FillPath(br, path);
+            if (segRect.Width > 0) FillRound(g, segRect, Pu(10), baseBg);
 
             for (int i = 0; i < Tiles.Count && i < rects.Count; i++) {
                 var t = Tiles[i];
                 var r = rects[i];
 
                 if (t.Row < 0) {
-                    if (t.Clickable) DrawSegment(g, t, r, i, baseBg);
+                    if (t.Clickable) DrawSegment(g, t, r, i, baseBg, grey);
                     else DrawStatus(g, t, r, grey);
                     continue;
                 }
 
-                DrawCard(g, t, r, i, Pu(10), baseBg);
+                DrawCard(g, t, r, i, Px(12), baseBg, edge);
 
-                // Sans sous-titre, icône et titre sont recentrés verticalement
-                int dy = string.IsNullOrEmpty(t.Sub) ? Pu(9) : 0;
+                // Pastille de la touche qui déclenche la carte (1 à 4, de gauche à
+                // droite) : touche en creux, plus sombre que la carte, contour discret
+                var kb = new Rectangle(r.X + Pu(8), r.Y + Pu(8), Px(KEY), Px(KEY));
+                FillRound(g, kb, Pu(4), Color.FromArgb(77, Color.Black));
+                DrawEdge(g, kb, Pu(4), Color.FromArgb(26, Color.White));
+                using (var b = new SolidBrush(grey))
+                    DrawInkCentered(g, (t.Col + 1).ToString(), fBadge, b, kb);
+
+                // Icône et titre à la même place sur toutes les cartes ; le
+                // sous-titre éventuel s'ajoute dessous sans les décaler
                 using (var b = new SolidBrush(t.Accent))
-                    g.DrawString(t.Glyph, fGlyph, b, new RectangleF(r.X, r.Y + Pu(14) + dy, r.Width, Pu(44)), center);
+                    g.DrawString(t.Glyph, fGlyph, b, new RectangleF(r.X, r.Y + Pu(20), r.Width, Pu(44)), center);
                 using (var b = new SolidBrush(Color.White))
-                    g.DrawString(t.Title, fTitle, b, new RectangleF(r.X + Pu(4), r.Y + Pu(64) + dy, r.Width - Pu(8), Pu(20)), center);
-                if (dy == 0)
+                    g.DrawString(t.Title, fTitle, b, new RectangleF(r.X + Pu(4), r.Y + Pu(70), r.Width - Pu(8), Pu(20)), center);
+                if (!string.IsNullOrEmpty(t.Sub))
                     using (var b = new SolidBrush(t.On ? Color.FromArgb(0xD0, 0xD0, 0xD0) : grey))
-                        g.DrawString(t.Sub, fSub, b, new RectangleF(r.X + Pu(4), r.Y + Pu(84), r.Width - Pu(8), Pu(18)), center);
+                        g.DrawString(t.Sub, fSub, b, new RectangleF(r.X + Pu(4), r.Y + Pu(88), r.Width - Pu(8), Pu(18)), center);
             }
         }
     }
@@ -817,13 +835,13 @@ function New-Tile([string]$id, [string]$glyph, [string]$accent) {
 
 # Les quatre actions sur une ligne, par paires, puis la barre audio en bas :
 #
-#   [HDR] [Overclock GPU]   [Écran noir] [Écran Philips]
-#   ─────────────────────────────────────────────────────
-#             ( Casque | Enceintes )    Micro actif
+#   [1 HDR] [2 Overclock GPU]   [3 Écran noir] [4 Écran Philips]
+#   ─────────────────────────────────────────────────────────────
+#   ( Casque | Enceintes )                         Micro actif
 #
 # HDR et OC se règlent avant de lancer un jeu, selon sa compatibilité ; les
-# deux boutons d'écran servent n'importe quand. Un bouton « allumé »
-# (teinté) est un état actif.
+# deux boutons d'écran servent n'importe quand. Les touches 1 à 4 déclenchent
+# les cartes de gauche à droite. Un bouton « allumé » (teinté) est un état actif.
 function Add-Tile([string]$id, [string]$glyph, [string]$accent, [int]$col, [int]$row, [string]$title = '') {
     $t = New-Tile $id $glyph $accent
     $t.Col = $col; $t.Row = $row; $t.Title = $title
@@ -833,18 +851,25 @@ function Add-Tile([string]$id, [string]$glyph, [string]$accent, [int]$col, [int]
 
 $deck = New-Object HotkeyDeck.DeckForm
 $DeckTiles = [ordered]@{}
-Add-Tile 'hdr'       'E706' 'FFC83D' 0 0 'HDR'
-Add-Tile 'gpu'       'EC4A' 'FF8C42' 1 0 'Overclock GPU'
-Add-Tile 'black'     'E708' 'A492FB' 2 0 'Écran noir'
-Add-Tile 'side'      'E7F4' 'C9D1DC' 3 0 'Écran Philips'
+Add-Tile 'hdr'       'E706' 'F5B82E' 0 0 'HDR'
+Add-Tile 'gpu'       'EC4A' 'FF9A3C' 1 0 'Overclock GPU'
+Add-Tile 'black'     'E708' 'A78BFA' 2 0 'Écran noir'
+Add-Tile 'side'      'E7F4' 'B8BCC4' 3 0 'Écran Philips'
+# Carte allumée : fond de l'accent translucide, opacité ajustée à chaque teinte.
+# L'argent, sans teinte, a besoin de plus d'opacité : à 12 % il donnait un gris
+# à peine plus clair qu'une carte éteinte
+$DeckTiles.hdr.OnAlpha = 0.13; $DeckTiles.gpu.OnAlpha = 0.14; $DeckTiles.black.OnAlpha = 0.15; $DeckTiles.side.OnAlpha = 0.24
 # Barre du bas (Row = -1) : sélecteur des profils audio (un segment par profil)
-# puis l'état du micro, centrés ensemble. Le micro est
-# vérifié à chaque appui sur son capteur et à l'ouverture du deck : il n'a pas
-# besoin d'être cliquable
+# à gauche, état du micro à droite. Le micro est vérifié à chaque appui sur son
+# capteur et à l'ouverture du deck : il n'a pas besoin d'être cliquable
 Add-Tile 'casque'    'E7F6' '4CC2FF' 0 -1 'Casque'
 Add-Tile 'enceintes' 'E7F5' '4CC2FF' 1 -1 'Enceintes'
 Add-Tile 'mic'       'E720' '3FB950' 2 -1 'Micro'
 $DeckTiles.mic.Clickable = $false
+foreach ($k in 'casque', 'enceintes') {
+    $DeckTiles[$k].OnColor = [System.Drawing.ColorTranslator]::FromHtml('#4AA3DF')
+    $DeckTiles[$k].OnAlpha = 0.20
+}
 $DeckTiles.black.Sub = 'Échap pour quitter'
 [HotkeyDeck.MonitorPower]::Refresh($DeckCfg.SideScreen)   # état connu dès la première ouverture
 

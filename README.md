@@ -33,7 +33,7 @@ Tout tient dans un script PowerShell lancé au démarrage. Le projet est né com
 
 ## Deck à l'écran
 
-Équivalent d'un Stream Deck affiché par-dessus l'écran. La touche **²** l'ouvre au centre de l'écran de la fenêtre active. On clique sur un bouton (souris seulement : les touches 1–9 ne font rien, pour éviter un déclenchement par réflexe en jeu). Échap, ² ou un clic ailleurs le referment, et le focus revient au jeu.
+Équivalent d'un Stream Deck affiché par-dessus l'écran. La touche **²** l'ouvre au centre de l'écran de la fenêtre active. On clique sur un bouton, ou on appuie sur la touche indiquée dans sa pastille : 1 à 4 (rangée du haut, `&` `é` `"` `'` en AZERTY, ou pavé numérique) pour les quatre cartes, de gauche à droite. Une touche tenue ne se répète pas. Échap, ² ou un clic ailleurs le referment, et le focus revient au jeu.
 
 ```
   [HDR] [Overclock GPU]   [Écran noir] [Écran Philips]
@@ -41,7 +41,7 @@ Tout tient dans un script PowerShell lancé au démarrage. Le projet est né com
             ( Casque | Enceintes )    Micro actif
 ```
 
-Les quatre actions sont sur une ligne, par paires : HDR et Overclock GPU se règlent avant de lancer un jeu (selon qu'il supporte le HDR ou l'OC), les deux boutons d'écran servent n'importe quand. La barre du bas regroupe l'audio : un sélecteur segmenté Casque / Enceintes (le profil actif est teinté) et l'état du micro, en lecture seule, centrés ensemble. Tous ses textes partagent la même ligne de base. Le volume n'y est pas : l'OSD l'affiche à chaque changement. Un bouton « allumé » (teinté) indique un état actif. Casque, Enceintes, Overclock GPU et Écran Philips laissent le deck ouvert (le bouton se met à jour) ; les autres boutons le referment.
+Les quatre actions sont sur une ligne, par paires : HDR et Overclock GPU se règlent avant de lancer un jeu (selon qu'il supporte le HDR ou l'OC), les deux boutons d'écran servent n'importe quand. La barre du bas regroupe l'audio : un sélecteur segmenté Casque / Enceintes (le profil actif est teinté) aligné à gauche, et l'état du micro, en lecture seule, aligné à droite. Tous ses textes partagent la même ligne de base. Le volume n'y est pas : l'OSD l'affiche à chaque changement. Un bouton « allumé » (teinté) indique un état actif. Casque, Enceintes, Overclock GPU et Écran Philips laissent le deck ouvert (le bouton se met à jour) ; les autres boutons le referment.
 
 | Bouton | Action |
 |--------|--------|
