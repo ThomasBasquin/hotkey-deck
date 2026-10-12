@@ -83,7 +83,7 @@ namespace HotkeyDeck {
         // entre deux paires, marge, barre du bas (hauteur, écart entre le trait et
         // ce qui l'entoure), largeur d'un segment du sélecteur audio, retrait de
         // l'état de la barre par rapport au bord droit des cartes
-        const int TW = 160, TH = 128, GAP = 12, PAIRGAP = 28, PAD = 18, BAR = 40, LINE = 18, SW = 140, RIGHTINSET = 4;
+        const int TW = 160, TH = 128, GAP = 12, PAIRGAP = 28, PAD = 18, BAR = 40, LINE = 18, SW = 140, RIGHTINSET = 10;
 
         public List<Tile> Tiles = new List<Tile>();
         public event Action<string> TileClicked;
@@ -528,8 +528,13 @@ namespace HotkeyDeck {
                     g.DrawLine(pen, barRect.X, lineY, barRect.Right, lineY);
             }
 
-            // Bloc du sélecteur audio, sous ses segments
-            if (segRect.Width > 0) FillRound(g, segRect, Pu(10), baseBg);
+            // Bloc du sélecteur audio, sous ses segments, avec le contour des cartes
+            // éteintes : sans lui, son bord se fond dans le fond et le segment
+            // actif, cerné de son accent, paraît déborder
+            if (segRect.Width > 0) {
+                FillRound(g, segRect, Pu(10), baseBg);
+                DrawEdge(g, segRect, Pu(10), edge);
+            }
 
             for (int i = 0; i < Tiles.Count && i < rects.Count; i++) {
                 var t = Tiles[i];
