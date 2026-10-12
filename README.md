@@ -33,7 +33,7 @@ Tout tient dans un script PowerShell lancé au démarrage. Le projet est né com
 
 ## Deck à l'écran
 
-Équivalent d'un Stream Deck affiché par-dessus l'écran. La touche **²** l'ouvre au centre de l'écran de la fenêtre active. On clique sur un bouton, ou on appuie sur la touche indiquée dans sa pastille : 1 à 4 (rangée du haut, `&` `é` `"` `'` en AZERTY, ou pavé numérique) pour les quatre cartes, de gauche à droite. Une touche tenue ne se répète pas. Échap, ² ou un clic ailleurs le referment, et le focus revient au jeu.
+Équivalent d'un Stream Deck affiché par-dessus l'écran. La touche **²** l'ouvre au centre de l'écran de la fenêtre active. On clique sur un bouton, ou on appuie sur sa touche : 1 à 4 (rangée du haut, `&` `é` `"` `'` en AZERTY, ou pavé numérique) pour les quatre cartes, de gauche à droite. Une touche tenue ne se répète pas. Échap, ² ou un clic ailleurs le referment, et le focus revient au jeu.
 
 ```
   [HDR] [Overclock GPU]   [Écran noir] [Écran Philips]

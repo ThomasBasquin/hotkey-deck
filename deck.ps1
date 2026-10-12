@@ -81,10 +81,9 @@ namespace HotkeyDeck {
 
         // Dimensions en pixels à 100 % : carte, écart entre les cartes d'une paire,
         // entre deux paires, marge, barre du bas (hauteur, écart entre le trait et
-        // ce qui l'entoure), largeur d'un segment du sélecteur audio, côté de la
-        // pastille de touche d'une carte (pair : son chiffre tombe pile au milieu),
-        // retrait de l'état de la barre par rapport au bord droit des cartes
-        const int TW = 160, TH = 128, GAP = 12, PAIRGAP = 28, PAD = 18, BAR = 40, LINE = 18, SW = 140, KEY = 18, RIGHTINSET = 4;
+        // ce qui l'entoure), largeur d'un segment du sélecteur audio, retrait de
+        // l'état de la barre par rapport au bord droit des cartes
+        const int TW = 160, TH = 128, GAP = 12, PAIRGAP = 28, PAD = 18, BAR = 40, LINE = 18, SW = 140, RIGHTINSET = 4;
 
         public List<Tile> Tiles = new List<Tile>();
         public event Action<string> TileClicked;
@@ -104,7 +103,7 @@ namespace HotkeyDeck {
         float scale = 1f;
         int hover = -1, pressed = -1;
         bool keyRepeat;   // dernier WM_KEYDOWN : touche déjà enfoncée (répétition, ou tenue avant l'ouverture)
-        Font fGlyph, fTitle, fSub, fBadge, fBarLabel, fBarValue, fBarGlyph;
+        Font fGlyph, fTitle, fSub, fBarLabel, fBarValue, fBarGlyph;
 
         public DeckForm() {
             FormBorderStyle = FormBorderStyle.None;
@@ -189,11 +188,10 @@ namespace HotkeyDeck {
         }
 
         void BuildFonts() {
-            foreach (var f in new[] { fGlyph, fTitle, fSub, fBadge, fBarLabel, fBarValue, fBarGlyph }) if (f != null) f.Dispose();
+            foreach (var f in new[] { fGlyph, fTitle, fSub, fBarLabel, fBarValue, fBarGlyph }) if (f != null) f.Dispose();
             fGlyph     = new Font("Segoe Fluent Icons", Pu(30), GraphicsUnit.Pixel);
             fTitle     = new Font("Segoe UI Semibold", Pu(14), GraphicsUnit.Pixel);
             fSub       = new Font("Segoe UI", Pu(11.5), GraphicsUnit.Pixel);
-            fBadge     = new Font("Segoe UI Semibold", Pu(10), GraphicsUnit.Pixel);
             fBarLabel  = new Font("Segoe UI", Pu(12.5), GraphicsUnit.Pixel);
             fBarValue  = new Font("Segoe UI Semibold", Pu(16), GraphicsUnit.Pixel);
             fBarGlyph  = new Font("Segoe Fluent Icons", Pu(17), GraphicsUnit.Pixel);
@@ -496,19 +494,6 @@ namespace HotkeyDeck {
             using (var br = new SolidBrush(c)) g.FillPath(br, path);
         }
 
-        // Texte centré sur son encre et non sur sa boîte, qui laisse plus de vide
-        // au-dessus qu'en dessous : chiffre des pastilles de touche
-        static void DrawInkCentered(Graphics g, string s, Font f, Brush b, Rectangle r) {
-            var fmt = StringFormat.GenericTypographic;
-            RectangleF ink;
-            using (var p = new GraphicsPath()) {
-                p.AddString(s, f.FontFamily, (int)f.Style, f.Size, PointF.Empty, fmt);
-                ink = p.GetBounds();
-            }
-            g.DrawString(s, f, b, (float)Math.Round(r.X + (r.Width - ink.Width) / 2 - ink.X),
-                                  (float)Math.Round(r.Y + (r.Height - ink.Height) / 2 - ink.Y), fmt);
-        }
-
         // Segment du sélecteur audio : teinté sur toute sa surface s'il est actif ;
         // sinon titre en gris, blanc au survol (une pastille de survol dessinerait
         // une forme qui ne colle pas au bloc commun) ; contenu centré : [icône] Titre
@@ -557,14 +542,6 @@ namespace HotkeyDeck {
                 }
 
                 DrawCard(g, t, r, i, Px(12), baseBg, edge);
-
-                // Pastille de la touche qui déclenche la carte (1 à 4, de gauche à
-                // droite) : touche en creux, plus sombre que la carte, contour discret
-                var kb = new Rectangle(r.X + Pu(8), r.Y + Pu(8), Px(KEY), Px(KEY));
-                FillRound(g, kb, Pu(4), Color.FromArgb(77, Color.Black));
-                DrawEdge(g, kb, Pu(4), Color.FromArgb(26, Color.White));
-                using (var b = new SolidBrush(grey))
-                    DrawInkCentered(g, (t.Col + 1).ToString(), fBadge, b, kb);
 
                 // Icône et titre à la même place sur toutes les cartes ; le
                 // sous-titre éventuel s'ajoute dessous sans les décaler
