@@ -41,6 +41,8 @@ Tout tient dans un script PowerShell lancé au démarrage. Le projet est né com
             ( Casque | Enceintes )    Micro actif
 ```
 
+Le fond du deck est en verre flouté, à la manière du Centre de contrôle d'Apple : juste avant l'ouverture, le script capture l'écran à l'endroit où le deck va s'afficher, le floute, ravive ses couleurs et pose un voile sombre par-dessus. Les cartes sont des voiles clairs sans contour, et tous les coins (fenêtre, cartes, sélecteur) ont le même rayon que les fenêtres de Windows 11. Le fond est figé à l'ouverture : il ne suit pas le jeu qui bouge derrière. Réglages (`BLURSCALE`, `BLURRADIUS`, `SATURATE`, `TINT`) en haut de la classe `DeckForm`, dans `deck.ps1`.
+
 Les quatre actions sont sur une ligne, par paires : HDR et Overclock GPU se règlent avant de lancer un jeu (selon qu'il supporte le HDR ou l'OC), les deux boutons d'écran servent n'importe quand. La barre du bas regroupe l'audio : un sélecteur segmenté Casque / Enceintes (le profil actif est teinté) aligné à gauche, et l'état du micro, en lecture seule, aligné à droite. Tous ses textes partagent la même ligne de base. Le volume n'y est pas : l'OSD l'affiche à chaque changement. Un bouton « allumé » (teinté) indique un état actif. Casque, Enceintes, Overclock GPU et Écran Philips laissent le deck ouvert (le bouton se met à jour) ; les autres boutons le referment.
 
 | Bouton | Action |
@@ -70,7 +72,7 @@ Bandeau rouge en haut au centre de l'écran principal, transparent aux clics, di
 La première version (AutoHotkey) était détectée par Easy Anti-Cheat (The Finals) à cause de son hook clavier bas niveau. Le script PowerShell n'en utilise aucun :
 
 - **Raccourcis via `RegisterHotKey`** (API Windows standard, comme Discord ou OBS). Windows avale les touches réservées : `²` ne tape plus de ², y compris dans les jeux qui l'utilisent pour leur console.
-- **Mesures en lecture seule** : mémoire partagée d'Afterburner, NVML, capture audio du micro.
+- **Mesures en lecture seule** : mémoire partagée d'Afterburner, NVML, capture audio du micro, et une capture de l'écran sous le deck à son ouverture (fond flouté), par l'API graphique standard de Windows comme les outils de capture d'écran.
 - **Aucune entrée simulée** : ni clavier ni souris.
 - **Second écran piloté par DDC/CI** via l'API Windows (`dxva2`), comme le font les logiciels des fabricants d'écrans.
 
@@ -110,11 +112,25 @@ Le micro n'expose pas son état de mute. Le script écoute son interface HID, qu
 
    `conhost --headless` évite le flash d'une fenêtre console. Une seule instance peut tourner à la fois (mutex).
 
+5. Après une modification des scripts, relancer : `schtasks /End` ne suffit pas (le `powershell.exe` du script survit, et la nouvelle instance se ferme aussitôt à cause du mutex). Il faut l'arrêter en administrateur puis relancer la tâche (une demande UAC s'affiche) :
+
+   ```powershell
+   Start-Process powershell -Verb RunAs -WindowStyle Hidden -Wait -ArgumentList '-NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.Name -eq ''powershell.exe'' -and $_.ProcessId -ne $PID -and $_.CommandLine -like ''*hotkey_deck.ps1*'' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }; Start-Sleep 1; schtasks /Run /TN ''Hotkey Deck''"'
+   ```
+
 Les fichiers `.ps1` doivent rester encodés en **UTF-8 avec BOM** (Windows PowerShell 5.1 lit sinon les accents et symboles de l'OSD en ANSI).
 
 ### Sauvegarde des profils
 
 `backup_peace.ps1` copie les profils Peace (`Casque.peace`, `Enceintes.peace`), `peace.ini`, `peace.txt` et `config.txt` dans `peace-config\`. À relancer puis commiter après chaque modification de l'EQ. Pour restaurer, recopier `peace-config\` vers `C:\Program Files\EqualizerAPO\config\` (en admin, Peace fermé). Les GUID des périphériques sont corrigés automatiquement au prochain switch.
+
+### Consommation
+
+Mesuré le 12/10/2026 : environ 0,2 % d'un cœur CPU au repos et ~130 Mo de mémoire (essentiellement PowerShell et .NET). Rien ne tourne en boucle :
+
+- toutes les 5 s : relecture de `peace.txt` et des modèles (petits fichiers, écrits seulement si l'EQ a changé), températures et ventilateurs (mémoire partagée d'Afterburner, NVML) ;
+- micro : un thread attend les messages du capteur (sans rien consommer), et une capture audio de 0,4 à 1 s n'a lieu qu'après un appui sur le capteur ou à l'ouverture du deck ;
+- deck : rien tant qu'il est fermé ; à l'ouverture, ~9 ms pour la capture et le flou du fond, une lecture DDC/CI de l'état du second écran, puis une mise à jour par seconde tant qu'il reste affiché.
 
 ### Diagnostic
 
