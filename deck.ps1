@@ -473,7 +473,7 @@ namespace HotkeyDeck {
                 g.DrawString(t.Value, fBarValue, b, x + gw + lw, TextTop(fBarValue, baseY), fmt);
         }
 
-        // Carte : fond gris, contour discret (idleEdge, Empty : sans contour) ;
+        // Carte : voile clair, contour discret (idleEdge, Empty : sans contour) ;
         // allumée, fond translucide de sa couleur et contour plein de cette
         // couleur ; éclaircie au survol
         void DrawCard(Graphics g, Tile t, Rectangle r, int i, int radius, Color baseBg, Color idleEdge) {
@@ -897,11 +897,11 @@ $DeckTiles = [ordered]@{}
 Add-Tile 'hdr'       'E706' 'F5B82E' 0 0 'HDR'
 Add-Tile 'gpu'       'EC4A' 'FF9A3C' 1 0 'Overclock GPU'
 Add-Tile 'black'     'E708' 'A78BFA' 2 0 'Écran noir'
-Add-Tile 'side'      'E7F4' 'B8BCC4' 3 0 'Écran Philips'
+Add-Tile 'side'      'E7F4' 'FF7AB8' 3 0 'Écran Philips'
 # Carte allumée : fond de l'accent translucide, opacité ajustée à chaque teinte.
-# L'argent, sans teinte, a besoin de plus d'opacité : à 12 % il donnait un gris
-# à peine plus clair qu'une carte éteinte
-$DeckTiles.hdr.OnAlpha = 0.13; $DeckTiles.gpu.OnAlpha = 0.14; $DeckTiles.black.OnAlpha = 0.15; $DeckTiles.side.OnAlpha = 0.24
+# Écran Philips en rose : le seul creux du cercle chromatique entre les autres
+# accents (l'argent se confondait avec une carte éteinte sur le fond flouté)
+$DeckTiles.hdr.OnAlpha = 0.13; $DeckTiles.gpu.OnAlpha = 0.14; $DeckTiles.black.OnAlpha = 0.15; $DeckTiles.side.OnAlpha = 0.16
 # Barre du bas (Row = -1) : sélecteur des profils audio (un segment par profil)
 # à gauche, état du micro à droite. Le micro est vérifié à chaque appui sur son
 # capteur et à l'ouverture du deck : il n'a pas besoin d'être cliquable
