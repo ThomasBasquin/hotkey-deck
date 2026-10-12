@@ -94,6 +94,11 @@ namespace HotkeyDeck {
         const int BLURSCALE = 6, BLURRADIUS = 3;
         const float SATURATE = 1.8f;
         static readonly Color TINT = Color.FromArgb(0x8C, 0x1C, 0x1C, 0x1C);
+        // Sur un écran clair, le verre virerait au gris moyen et les cartes au
+        // gris clair : au-dessus de KNEE, la luminance du flou ne monte plus
+        // qu'à raison de ABOVE (le fond reste sombre, ses couleurs gardées)
+        const int KNEE = 64;
+        const float ABOVE = 0.25f;
         Bitmap backdrop;
 
         public List<Tile> Tiles = new List<Tile>();
@@ -528,6 +533,7 @@ namespace HotkeyDeck {
                         g.DrawImage(shot, new Rectangle(0, 0, sw, sh));
                     }
                     for (int pass = 0; pass < 3; pass++) BoxBlur(small, BLURRADIUS);   // 3 passes ≈ flou gaussien
+                    Darken(small);
                     float s = SATURATE, r = (1 - s) * 0.2126f, gr = (1 - s) * 0.7152f, b = (1 - s) * 0.0722f;
                     var sat = new ColorMatrix(new[] {
                         new[] { r + s, r, r, 0f, 0f }, new[] { gr, gr + s, gr, 0f, 0f }, new[] { b, b, b + s, 0f, 0f },
@@ -566,6 +572,24 @@ namespace HotkeyDeck {
                         tmp[idx] = (0xFF << 24) | ((sr / cnt) << 16) | ((sg / cnt) << 8) | (sb / cnt);
                     }
                 var t = px; px = tmp; tmp = t;
+            }
+            Marshal.Copy(px, 0, data.Scan0, px.Length);
+            bmp.UnlockBits(data);
+        }
+
+        // Comprime les hautes lumières (voir KNEE) : chaque pixel est mis à
+        // l'échelle pour garder sa teinte
+        static void Darken(Bitmap bmp) {
+            int w = bmp.Width, h = bmp.Height;
+            var data = bmp.LockBits(new Rectangle(0, 0, w, h), ImageLockMode.ReadWrite, PixelFormat.Format32bppRgb);
+            var px = new int[w * h];
+            Marshal.Copy(data.Scan0, px, 0, px.Length);
+            for (int i = 0; i < px.Length; i++) {
+                int c = px[i], r = (c >> 16) & 0xFF, g = (c >> 8) & 0xFF, b = c & 0xFF;
+                float y = 0.2126f * r + 0.7152f * g + 0.0722f * b;
+                if (y <= KNEE) continue;
+                float k = (KNEE + (y - KNEE) * ABOVE) / y;
+                px[i] = (0xFF << 24) | ((int)(r * k) << 16) | ((int)(g * k) << 8) | (int)(b * k);
             }
             Marshal.Copy(px, 0, data.Scan0, px.Length);
             bmp.UnlockBits(data);
