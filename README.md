@@ -107,7 +107,7 @@ Le micro n'expose pas son état de mute. Le script écoute son interface HID, qu
 4. Lancement au démarrage via la tâche planifiée **"Hotkey Deck"** (déclencheur : ouverture de session, niveau d'exécution : le plus élevé — nécessaire pour écrire dans `Program Files` et fermer Peace s'il tourne en admin), action :
 
    ```
-   conhost.exe --headless powershell.exe -NoProfile -Sta -ExecutionPolicy Bypass -File "C:\Users\Thomas\Documents\hotkey-deck\hotkey_deck.ps1"
+   conhost.exe --headless powershell.exe -NoProfile -Sta -ExecutionPolicy Bypass -File "C:\Users\Thomas\code\hotkey-deck\hotkey_deck.ps1"
    ```
 
    `conhost --headless` évite le flash d'une fenêtre console. Une seule instance peut tourner à la fois (mutex).
@@ -143,7 +143,7 @@ Version d'origine, limitée au son (preamp, profils, écran noir). Conservée co
 Prérequis : [AutoHotkey v2](https://www.autohotkey.com/), Equalizer APO et Peace. Pour y revenir au démarrage, remettre comme action de la tâche planifiée **"Hotkey Deck"** :
 
 ```
-"C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe" "C:\Users\Thomas\Documents\hotkey-deck\peace_preamp.ahk"
+"C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe" "C:\Users\Thomas\code\hotkey-deck\peace_preamp.ahk"
 ```
 
 Journal dans `%TEMP%\peace_preamp.log`. Ses profils sont dans la `Map` `profiles` en haut du script.
