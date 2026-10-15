@@ -1,4 +1,4 @@
-﻿# Deck — "Stream Deck" à l'écran, chargé par hotkey_deck.ps1 (dot-source)
+﻿# Deck — "Stream Deck" à l'écran, chargé par virtual_deck.ps1 (dot-source)
 #
 # La touche ² (AZERTY, à gauche de 1) ouvre une grille de
 # boutons au centre de l'écran du jeu / de la fenêtre active ; un clic, ou les
@@ -52,7 +52,7 @@ using System.IO.MemoryMappedFiles;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
-namespace HotkeyDeck {
+namespace VirtualDeck {
     public class Tile {
         public string Id, Glyph = "", Title = "", Sub = "";
         public Color Accent = Color.FromArgb(0x4C, 0xC2, 0xFF);
@@ -893,7 +893,7 @@ namespace HotkeyDeck {
 #  TUILES
 # ============================================================
 function New-Tile([string]$id, [string]$glyph, [string]$accent) {
-    $t = New-Object HotkeyDeck.Tile
+    $t = New-Object VirtualDeck.Tile
     $t.Id = $id
     $t.Glyph = if ($glyph) { [string][char][Convert]::ToInt32($glyph, 16) } else { '' }
     $t.Accent = [System.Drawing.ColorTranslator]::FromHtml("#$accent")
@@ -916,7 +916,7 @@ function Add-Tile([string]$id, [string]$glyph, [string]$accent, [int]$col, [int]
     $deck.Tiles.Add($t)
 }
 
-$deck = New-Object HotkeyDeck.DeckForm
+$deck = New-Object VirtualDeck.DeckForm
 $DeckTiles = [ordered]@{}
 Add-Tile 'hdr'       'E706' 'F5B82E' 0 0 'HDR'
 Add-Tile 'gpu'       'EC4A' 'FF9A3C' 1 0 'Overclock GPU'
@@ -938,7 +938,7 @@ foreach ($k in 'casque', 'enceintes') {
     $DeckTiles[$k].OnAlpha = 0.20
 }
 $DeckTiles.black.Sub = 'Échap pour quitter'
-[HotkeyDeck.MonitorPower]::Refresh($DeckCfg.SideScreen)   # état connu dès la première ouverture
+[VirtualDeck.MonitorPower]::Refresh($DeckCfg.SideScreen)   # état connu dès la première ouverture
 
 # Un segment par profil : celui qui est actif est allumé
 function Update-DeckAudio {
@@ -954,10 +954,10 @@ function Update-DeckMic {
     if (-not $m.Connected) {
         $t.Glyph = [string][char]0xF781; $t.Value = 'débranché'
         $t.Accent = [System.Drawing.ColorTranslator]::FromHtml('#8B949E')
-    } elseif ($m.State -eq [HotkeyDeck.MicWatcher]::Muted) {
+    } elseif ($m.State -eq [VirtualDeck.MicWatcher]::Muted) {
         $t.Glyph = [string][char]0xF781; $t.Value = 'coupé'
         $t.Accent = [System.Drawing.ColorTranslator]::FromHtml('#F85149')
-    } elseif ($m.State -eq [HotkeyDeck.MicWatcher]::Active) {
+    } elseif ($m.State -eq [VirtualDeck.MicWatcher]::Active) {
         $t.Glyph = [string][char]0xE720; $t.Value = 'actif'
         $t.Accent = [System.Drawing.ColorTranslator]::FromHtml('#3FB950')
     } else {
@@ -968,7 +968,7 @@ function Update-DeckMic {
 
 function Update-DeckHdr {
     $t = $DeckTiles.hdr
-    $h = [HotkeyDeck.HdrControl]::Get()
+    $h = [VirtualDeck.HdrControl]::Get()
     $t.On = $h -eq 1
     $t.Clickable = $h -ge 0
     $t.Sub = if ($h -lt 0) { 'Non supporté' } else { '' }
@@ -976,7 +976,7 @@ function Update-DeckHdr {
 
 function Update-DeckGpu {
     $t = $DeckTiles.gpu
-    $oc = [HotkeyDeck.Sensors]::GpuOverclocked()
+    $oc = [VirtualDeck.Sensors]::GpuOverclocked()
     $t.On = $oc -eq 1
     $t.Sub = if ($oc -lt 0) { 'NVML indisponible' } else { '' }
 }
@@ -985,8 +985,8 @@ function Update-DeckGpu {
 # carte suit au rafraîchissement suivant du deck
 function Update-DeckSide {
     $t = $DeckTiles.side
-    $st = [HotkeyDeck.MonitorPower]::State
-    $t.On = $st -eq [HotkeyDeck.MonitorPower]::On
+    $st = [VirtualDeck.MonitorPower]::State
+    $t.On = $st -eq [VirtualDeck.MonitorPower]::On
     $t.Sub = if ($st -lt 0) { 'Ne répond pas' } else { '' }
 }
 
@@ -994,8 +994,8 @@ function Update-DeckSide {
 #  ACTIONS
 # ============================================================
 function Toggle-Hdr {
-    $on = [HotkeyDeck.HdrControl]::Get() -ne 1
-    $n = [HotkeyDeck.HdrControl]::Set($on)
+    $on = [VirtualDeck.HdrControl]::Get() -ne 1
+    $n = [VirtualDeck.HdrControl]::Set($on)
     Log "Deck : HDR $(if ($on) { 'activé' } else { 'désactivé' }) sur $n écran(s)"
     if ($n -gt 0) { Show-Osd 'HDR' $(if ($on) { 'Activé' } else { 'Désactivé' }) 1500 }
     else          { Show-Osd '⚠ HDR' 'Échec' 2500 '801010' }
@@ -1009,7 +1009,7 @@ function Toggle-GpuProfile {
     }
     # Pendant la confirmation d'un changement en cours, la limite de puissance
     # n'a peut-être pas encore suivi : on part de l'état demandé
-    $toOc = if ($deckGpuCheck.Enabled) { -not $S.DeckGpuExpect } else { [HotkeyDeck.Sensors]::GpuOverclocked() -ne 1 }
+    $toOc = if ($deckGpuCheck.Enabled) { -not $S.DeckGpuExpect } else { [VirtualDeck.Sensors]::GpuOverclocked() -ne 1 }
     $n = if ($toOc) { $DeckCfg.ProfileOC } else { $DeckCfg.ProfileStock }
     # Une 2e instance d'Afterburner transmet le profil à celle qui tourne, puis se ferme
     Start-Process $DeckCfg.Afterburner -ArgumentList "-Profile$n"
@@ -1024,7 +1024,7 @@ $deckGpuCheck = New-Object System.Windows.Forms.Timer
 $deckGpuCheck.Interval = 3000
 $deckGpuCheck.add_Tick({ Safe {
     $deckGpuCheck.Stop()
-    $oc = [HotkeyDeck.Sensors]::GpuOverclocked()
+    $oc = [VirtualDeck.Sensors]::GpuOverclocked()
     if ($oc -ge 0 -and $oc -ne $S.DeckGpuExpect) {
         Log "Deck : le profil Afterburner ne s'est pas appliqué (limite de puissance inchangée)"
         Show-Osd '⚠ GPU' 'Profil non appliqué' 3000 '801010'
@@ -1036,8 +1036,8 @@ $deckGpuCheck.add_Tick({ Safe {
 
 # Second écran : allumé ↔ éteint (une veille compte comme éteint : on l'allume)
 function Toggle-SideScreen {
-    $on = [HotkeyDeck.MonitorPower]::State -ne [HotkeyDeck.MonitorPower]::On
-    [HotkeyDeck.MonitorPower]::Set($DeckCfg.SideScreen, $(if ($on) { [HotkeyDeck.MonitorPower]::On } else { [HotkeyDeck.MonitorPower]::Off }))
+    $on = [VirtualDeck.MonitorPower]::State -ne [VirtualDeck.MonitorPower]::On
+    [VirtualDeck.MonitorPower]::Set($DeckCfg.SideScreen, $(if ($on) { [VirtualDeck.MonitorPower]::On } else { [VirtualDeck.MonitorPower]::Off }))
     Log "Deck : écran $($DeckCfg.SideScreen) $(if ($on) { 'allumé' } else { 'éteint' }) (DDC/CI)"
     Update-DeckSide   # affichage immédiat, confirmé par la relecture
     $deckSideCheck.Stop(); $deckSideCheck.Start()
@@ -1048,7 +1048,7 @@ $deckSideCheck = New-Object System.Windows.Forms.Timer
 $deckSideCheck.Interval = 4000
 $deckSideCheck.add_Tick({ Safe {
     $deckSideCheck.Stop()
-    [HotkeyDeck.MonitorPower]::Refresh($DeckCfg.SideScreen)
+    [VirtualDeck.MonitorPower]::Refresh($DeckCfg.SideScreen)
 }})
 
 function Invoke-DeckAction([string]$id) {
@@ -1075,7 +1075,7 @@ function Invoke-DeckAction([string]$id) {
 # bas (un changement de volume ne le masque pas), transparent aux clics. Une
 # ligne par alerte en cours ; il reste affiché tant qu'il en reste une, pour
 # ne pas pouvoir la manquer (une OSD de quelques secondes passe inaperçue).
-$alertBanner = New-Object HotkeyDeck.OsdForm
+$alertBanner = New-Object VirtualDeck.OsdForm
 $alertBanner.FormBorderStyle = 'None'
 $alertBanner.StartPosition   = 'Manual'
 $alertBanner.ShowInTaskbar   = $false
@@ -1091,7 +1091,7 @@ $alertText.ForeColor = [System.Drawing.Color]::White
 $alertBanner.Controls.Add($alertText)
 $alertBanner.add_HandleCreated({
     $v = 2
-    [HotkeyDeck.Native]::DwmSetWindowAttribute($alertBanner.Handle, 33, [ref]$v, 4) | Out-Null
+    [VirtualDeck.Native]::DwmSetWindowAttribute($alertBanner.Handle, 33, [ref]$v, 4) | Out-Null
 })
 $S.Alerts = [ordered]@{ Temp = ''; Sensor = ''; Fans = '' }
 
@@ -1131,8 +1131,8 @@ $S.TempWatch = @{
 }
 
 function Check-Temps {
-    [void][HotkeyDeck.Sensors]::Read()
-    $vals = @{ CPU = [HotkeyDeck.Sensors]::Cpu; GPU = [HotkeyDeck.Sensors]::Gpu }
+    [void][VirtualDeck.Sensors]::Read()
+    $vals = @{ CPU = [VirtualDeck.Sensors]::Cpu; GPU = [VirtualDeck.Sensors]::Gpu }
     foreach ($k in 'CPU', 'GPU') {
         $v = $vals[$k]; $w = $S.TempWatch[$k]
         if ([float]::IsNaN($v)) {
@@ -1173,7 +1173,7 @@ function Check-Temps {
 $S.FanWatch = @{ Above = 0; Shown = $false }
 
 function Check-Fans {
-    $pct = [HotkeyDeck.Sensors]::GpuFanMax()
+    $pct = [VirtualDeck.Sensors]::GpuFanMax()
     if ($pct -lt 0) { return }
     $w = $S.FanWatch
     if ($pct -gt $DeckCfg.FanMax) {
@@ -1210,7 +1210,7 @@ function Open-Deck {
         try { & $u } catch { Log "Deck : $u en erreur : $($_.Exception.Message)" }
     }
     # Relit l'état du second écran (sauf changement en cours, pas encore lisible)
-    if (-not $deckSideCheck.Enabled) { [HotkeyDeck.MonitorPower]::Refresh($DeckCfg.SideScreen) }
+    if (-not $deckSideCheck.Enabled) { [VirtualDeck.MonitorPower]::Refresh($DeckCfg.SideScreen) }
     $prep = $sw.ElapsedMilliseconds
     $S.DeckNoFocus = $false
     $res = $deck.ShowDeck()
@@ -1230,7 +1230,7 @@ function Format-Mods([int]$m) {
 }
 
 function Toggle-Deck([int]$mods = 0) {
-    Log "Deck : touche $(Format-Mods $mods)² (fenêtre active : $([HotkeyDeck.DeckForm]::DescribeForeground()))"
+    Log "Deck : touche $(Format-Mods $mods)² (fenêtre active : $([VirtualDeck.DeckForm]::DescribeForeground()))"
     if ($deck.Visible) { $deck.HideDeck($true, 'touche ²') } else { Open-Deck }
 }
 
@@ -1243,7 +1243,7 @@ $deckTimer.add_Tick({ Safe {
         $deck.FocusLost()   # ferme si Alt/Windows encore enfoncé (changement de fenêtre voulu)
         if (-not $deck.Visible) { $deckTimer.Stop(); return }
         # Affiché sans le focus : le jeu garde la souris, ² ferme le deck (diagnostic)
-        if (-not $S.DeckNoFocus) { Log "Deck : affiché sans le focus (actif : $([HotkeyDeck.DeckForm]::DescribeForeground()))" }
+        if (-not $S.DeckNoFocus) { Log "Deck : affiché sans le focus (actif : $([VirtualDeck.DeckForm]::DescribeForeground()))" }
         $S.DeckNoFocus = $true
     } else { $S.DeckNoFocus = $false }
     Update-DeckMic

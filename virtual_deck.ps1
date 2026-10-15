@@ -1,4 +1,4 @@
-﻿# hotkey-deck — raccourcis clavier et deck à l'écran pour le PC
+﻿# virtual-deck — raccourcis clavier et deck à l'écran pour le PC
 #
 # Né comme portage PowerShell de peace_preamp.ahk (preamp de Peace / Equalizer
 # APO), sans hook clavier/souris bas niveau ni injection de touches (ce qui
@@ -40,7 +40,7 @@ $MicOsd = $true
 # ============================================================
 #  INSTANCE UNIQUE
 # ============================================================
-$mutex = New-Object System.Threading.Mutex($false, 'Local\HotkeyDeck')
+$mutex = New-Object System.Threading.Mutex($false, 'Local\VirtualDeck')
 if (-not $mutex.WaitOne(0)) { exit }
 
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
@@ -53,7 +53,7 @@ using System.Threading;
 using System.Windows.Forms;
 using Microsoft.Win32.SafeHandles;
 
-namespace HotkeyDeck {
+namespace VirtualDeck {
     // ---- WASAPI (capture "raw" du micro pour lire son état de mute) ----
     [ComImport, Guid("A95664D2-9614-4F35-A746-DE8DB63617E6"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
     interface IMMDeviceEnumerator {
@@ -453,7 +453,7 @@ namespace HotkeyDeck {
 }
 '@
 
-[HotkeyDeck.Native]::EnableDpiAwareness()
+[VirtualDeck.Native]::EnableDpiAwareness()
 [System.Windows.Forms.Application]::EnableVisualStyles()
 
 $Inv = [System.Globalization.CultureInfo]::InvariantCulture
@@ -466,7 +466,7 @@ $S = @{
     PeaceDir     = 'C:\Program Files\EqualizerAPO\config'
     PeaceFile    = 'C:\Program Files\EqualizerAPO\config\peace.txt'
     TemplatesDir = Join-Path $PSScriptRoot 'templates'
-    LogFile      = Join-Path $env:TEMP 'hotkey_deck.log'
+    LogFile      = Join-Path $env:TEMP 'virtual_deck.log'
     Active       = 'enceintes'
     Muted        = $false
     Black        = @()
@@ -667,7 +667,7 @@ function Switch-Profile([string]$key, [switch]$Quiet) {
     }
 
     # Sortie Windows par défaut
-    $hr = [HotkeyDeck.Native]::SetDefaultAudioDevice("{0.0.0.00000000}.$guid")
+    $hr = [VirtualDeck.Native]::SetDefaultAudioDevice("{0.0.0.00000000}.$guid")
     if ($hr -ne 0) { Log ("SetDefaultAudioDevice HRESULT=0x{0:X8}" -f $hr) }
 
     # peace.txt = modèle du profil, avec le GUID actuel du device (anti-dérive)
@@ -743,7 +743,7 @@ function Px([double]$v) { [int][Math]::Round($v * $Scale) }
 # +0.5 : WinForms tronque Opacity*255 en octet, ça garantit la valeur exacte.
 $OsdAlpha = 242
 function Set-OsdAlpha([int]$a) { $S.Alpha = $a; $osd.Opacity = ($a + 0.5) / 255.0 }
-$osd = New-Object HotkeyDeck.OsdForm
+$osd = New-Object VirtualDeck.OsdForm
 $osd.FormBorderStyle = 'None'
 $osd.StartPosition   = 'Manual'
 $osd.ShowInTaskbar   = $false
@@ -792,8 +792,8 @@ $txtIcon.BringToFront()
 # Coins arrondis Windows 11 + ombre
 $osd.add_HandleCreated({
     $v = 2
-    [HotkeyDeck.Native]::DwmSetWindowAttribute($osd.Handle, 33, [ref]$v, 4) | Out-Null
-    [HotkeyDeck.Native]::DwmSetWindowAttribute($osd.Handle, 2,  [ref]$v, 4) | Out-Null
+    [VirtualDeck.Native]::DwmSetWindowAttribute($osd.Handle, 33, [ref]$v, 4) | Out-Null
+    [VirtualDeck.Native]::DwmSetWindowAttribute($osd.Handle, 2,  [ref]$v, 4) | Out-Null
 })
 
 $osdTimer = New-Object System.Windows.Forms.Timer
@@ -891,10 +891,10 @@ function Show-Osd([string]$label, [string]$value, [int]$durationMs = 0, [string]
 # qu'une fois la touche ou le bouton relâché, sinon le jeu recevrait le
 # relâchement (menu ouvert, tir).
 # $prev : fenêtre à qui rendre le focus (le jeu) ; par défaut la fenêtre active
-function Show-BlackScreen([IntPtr]$prev = [HotkeyDeck.Native]::GetForegroundWindow()) {
+function Show-BlackScreen([IntPtr]$prev = [VirtualDeck.Native]::GetForegroundWindow()) {
     $S.BlackPrev = $prev
     foreach ($screen in [System.Windows.Forms.Screen]::AllScreens) {
-        $f = New-Object HotkeyDeck.BlackForm
+        $f = New-Object VirtualDeck.BlackForm
         $f.FormBorderStyle = 'None'
         $f.StartPosition   = 'Manual'
         $f.ShowInTaskbar   = $false
@@ -906,13 +906,13 @@ function Show-BlackScreen([IntPtr]$prev = [HotkeyDeck.Native]::GetForegroundWind
         # Le déplacement vers un écran à autre DPI peut redimensionner la
         # fenêtre : on réimpose les dimensions physiques de l'écran.
         $b = $screen.Bounds
-        [HotkeyDeck.Native]::PlaceTopmost($f.Handle, $b.X, $b.Y, $b.Width, $b.Height)
+        [VirtualDeck.Native]::PlaceTopmost($f.Handle, $b.X, $b.Y, $b.Width, $b.Height)
         $S.Black += $f
     }
     $err = $S.Hk.Register(100, 0, 0x1B)   # Échap
     if ($err) { Log "Échap non réservable pendant l'écran noir (err $err)" }
-    $ok = [HotkeyDeck.Native]::ForceForeground($S.Black[-1].Handle)
-    Log "Écran noir : affiché $(if ($ok) { 'au premier plan' } else { "SANS le premier plan (actif : $([HotkeyDeck.DeckForm]::DescribeForeground()))" })"
+    $ok = [VirtualDeck.Native]::ForceForeground($S.Black[-1].Handle)
+    Log "Écran noir : affiché $(if ($ok) { 'au premier plan' } else { "SANS le premier plan (actif : $([VirtualDeck.DeckForm]::DescribeForeground()))" })"
 }
 
 # Fermeture demandée au clavier (touche vk encore enfoncée) : on attend
@@ -920,7 +920,7 @@ function Show-BlackScreen([IntPtr]$prev = [HotkeyDeck.Native]::GetForegroundWind
 $blackRelease = New-Object System.Windows.Forms.Timer
 $blackRelease.Interval = 20
 $blackRelease.add_Tick({ Safe {
-    if ([HotkeyDeck.Native]::KeyDown($S.BlackWaitVk) -and ([DateTime]::Now - $S.BlackWaitFrom).TotalSeconds -lt 2) { return }
+    if ([VirtualDeck.Native]::KeyDown($S.BlackWaitVk) -and ([DateTime]::Now - $S.BlackWaitFrom).TotalSeconds -lt 2) { return }
     $blackRelease.Stop()
     Hide-BlackScreen
 }})
@@ -937,7 +937,7 @@ function Hide-BlackScreen {
     $S.Hk.Unregister(100)
     # Focus rendu au jeu avant de fermer : tant que l'écran noir l'a, Windows nous y autorise
     $p = $S.BlackPrev
-    if ($p -ne [IntPtr]::Zero -and [HotkeyDeck.Native]::IsWindow($p)) { [void][HotkeyDeck.Native]::SetForegroundWindow($p) }
+    if ($p -ne [IntPtr]::Zero -and [VirtualDeck.Native]::IsWindow($p)) { [void][VirtualDeck.Native]::SetForegroundWindow($p) }
     foreach ($f in $S.Black) { $f.Close(); $f.Dispose() }
     $S.Black = @()
     $S.BlackPrev = [IntPtr]::Zero
@@ -957,11 +957,11 @@ function Update-MicDisplay {
 function Show-MicOsd {
     if (-not $MicOsd) { return }
     # Coupé : icône seule (glyphe Segoe Fluent Icons F781 = micro barré)
-    if ($S.Mic.State -eq [HotkeyDeck.MicWatcher]::Muted) { Show-Osd 'Micro' '' 1000 '202020' ([string][char]0xF781) }
+    if ($S.Mic.State -eq [VirtualDeck.MicWatcher]::Muted) { Show-Osd 'Micro' '' 1000 '202020' ([string][char]0xF781) }
     else                                                  { Show-Osd 'Micro' 'Activé' 1000 }
 }
 
-$micWatcher = New-Object HotkeyDeck.MicWatcher
+$micWatcher = New-Object VirtualDeck.MicWatcher
 
 function Poll-Mic {
     $m = $S.Mic
@@ -994,7 +994,7 @@ function Poll-Mic {
         if ($micWatcher.CheckedToggles -ne $micWatcher.Toggles) { return }
         $prev = $m.State
         $m.State = $micWatcher.State
-        if ($m.State -eq [HotkeyDeck.MicWatcher]::Unknown -and $m.Connected) {
+        if ($m.State -eq [VirtualDeck.MicWatcher]::Unknown -and $m.Connected) {
             Log "Micro : vérification impossible ($($micWatcher.LastError))"
         }
         if ($m.State -ne $prev) {
@@ -1091,7 +1091,7 @@ if ($ClosePeace) {
     }
 }
 
-$S.Hk = New-Object HotkeyDeck.HotkeyWindow
+$S.Hk = New-Object VirtualDeck.HotkeyWindow
 $S.Hk.add_Pressed({ param($id) Safe { On-Hotkey $id } })
 
 $MOD_ALT = 0x1; $MOD_CONTROL = 0x2; $MOD_NOREPEAT = 0x4000

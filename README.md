@@ -1,4 +1,4 @@
-# hotkey-deck
+# virtual-deck
 
 Raccourcis clavier et deck à l'écran pour piloter un PC Windows de jeu, sans se faire repérer par les anti-cheats :
 
@@ -11,7 +11,7 @@ Tout tient dans un script PowerShell lancé au démarrage. Le projet est né com
 
 | Fichier | Rôle |
 |---------|------|
-| `hotkey_deck.ps1` | **Script principal** : raccourcis, son, micro, OSD, écran noir ; charge `deck.ps1` |
+| `virtual_deck.ps1` | **Script principal** : raccourcis, son, micro, OSD, écran noir ; charge `deck.ps1` |
 | `deck.ps1` | Deck à l'écran (touche `²`) |
 | `backup_peace.ps1` | Sauvegarde des profils Peace dans `peace-config\` |
 | `templates\` | Modèles `peace.txt` des profils Casque / Enceintes |
@@ -85,7 +85,7 @@ La première version (AutoHotkey) était détectée par Easy Anti-Cheat (The Fin
 - **GUID du DAC USB corrigé automatiquement** quand il change d'identité, avec nouvelle tentative (~1.2 s) si le périphérique n'est pas encore actif.
 - **Peace est fermé au démarrage** : il réserve lui aussi `Ctrl+Alt+F1/F2`, ce qui empêcherait le script de les obtenir. Il n'est pas nécessaire au son (c'est Equalizer APO qui applique `peace.txt`). Désactivable via `$ClosePeace` en haut du script.
 
-Les profils sont définis dans `$S.Profiles`, en haut de `hotkey_deck.ps1` :
+Les profils sont définis dans `$S.Profiles`, en haut de `virtual_deck.ps1` :
 
 | Paramètre | Description |
 |-----------|-------------|
@@ -104,10 +104,10 @@ Le micro n'expose pas son état de mute. Le script écoute son interface HID, qu
 1. Installer [Equalizer APO](https://sourceforge.net/projects/equalizerapo/) et [Peace](https://sourceforge.net/projects/peace-equalizer-apo-extension/), créer les profils `Casque.peace` et `Enceintes.peace`.
 2. Capturer les modèles : appliquer chaque profil dans Peace et copier `C:\Program Files\EqualizerAPO\config\peace.txt` vers `templates\casque.txt` / `templates\enceintes.txt`.
 3. Pour le deck : [MSI Afterburner](https://www.msi.com/Landing/afterburner) (profils 1 et 2, monitoring des températures CPU/GPU activé).
-4. Lancement au démarrage via la tâche planifiée **"Hotkey Deck"** (déclencheur : ouverture de session, niveau d'exécution : le plus élevé — nécessaire pour écrire dans `Program Files` et fermer Peace s'il tourne en admin), action :
+4. Lancement au démarrage via la tâche planifiée **"Virtual Deck"** (déclencheur : ouverture de session, niveau d'exécution : le plus élevé — nécessaire pour écrire dans `Program Files` et fermer Peace s'il tourne en admin), action :
 
    ```
-   conhost.exe --headless powershell.exe -NoProfile -Sta -ExecutionPolicy Bypass -File "C:\Users\Thomas\code\hotkey-deck\hotkey_deck.ps1"
+   conhost.exe --headless powershell.exe -NoProfile -Sta -ExecutionPolicy Bypass -File "C:\Users\Thomas\code\virtual-deck\virtual_deck.ps1"
    ```
 
    `conhost --headless` évite le flash d'une fenêtre console. Une seule instance peut tourner à la fois (mutex).
@@ -115,7 +115,7 @@ Le micro n'expose pas son état de mute. Le script écoute son interface HID, qu
 5. Après une modification des scripts, relancer : `schtasks /End` ne suffit pas (le `powershell.exe` du script survit, et la nouvelle instance se ferme aussitôt à cause du mutex). Il faut l'arrêter en administrateur puis relancer la tâche (une demande UAC s'affiche) :
 
    ```powershell
-   Start-Process powershell -Verb RunAs -WindowStyle Hidden -Wait -ArgumentList '-NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.Name -eq ''powershell.exe'' -and $_.ProcessId -ne $PID -and $_.CommandLine -like ''*hotkey_deck.ps1*'' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }; Start-Sleep 1; schtasks /Run /TN ''Hotkey Deck''"'
+   Start-Process powershell -Verb RunAs -WindowStyle Hidden -Wait -ArgumentList '-NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.Name -eq ''powershell.exe'' -and $_.ProcessId -ne $PID -and $_.CommandLine -like ''*virtual_deck.ps1*'' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }; Start-Sleep 1; schtasks /Run /TN ''Virtual Deck''"'
    ```
 
 Les fichiers `.ps1` doivent rester encodés en **UTF-8 avec BOM** (Windows PowerShell 5.1 lit sinon les accents et symboles de l'OSD en ANSI).
@@ -134,16 +134,16 @@ Mesuré le 12/10/2026 : environ 0,2 % d'un cœur CPU au repos et ~130 Mo de mém
 
 ### Diagnostic
 
-Journal dans `%TEMP%\hotkey_deck.log` (rotation au-delà de 256 Ko) : démarrage, raccourcis non réservables, switchs de profil, mises à jour des modèles, micro, actions du deck, erreurs.
+Journal dans `%TEMP%\virtual_deck.log` (rotation au-delà de 256 Ko) : démarrage, raccourcis non réservables, switchs de profil, mises à jour des modèles, micro, actions du deck, erreurs.
 
 ## Version AutoHotkey (`peace_preamp.ahk`)
 
 Version d'origine, limitée au son (preamp, profils, écran noir). Conservée comme repli : son hook clavier bas niveau et le binaire AutoHotkey sont détectés par certains anti-cheats. Elle passe par les raccourcis de Peace (`Ctrl+Alt+F1/F2`) pour changer de profil, réinstalle périodiquement son hook clavier (que certains jeux éjectent) et s'auto-élève via `RunAs` si on la lance à la main.
 
-Prérequis : [AutoHotkey v2](https://www.autohotkey.com/), Equalizer APO et Peace. Pour y revenir au démarrage, remettre comme action de la tâche planifiée **"Hotkey Deck"** :
+Prérequis : [AutoHotkey v2](https://www.autohotkey.com/), Equalizer APO et Peace. Pour y revenir au démarrage, remettre comme action de la tâche planifiée **"Virtual Deck"** :
 
 ```
-"C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe" "C:\Users\Thomas\code\hotkey-deck\peace_preamp.ahk"
+"C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe" "C:\Users\Thomas\code\virtual-deck\peace_preamp.ahk"
 ```
 
 Journal dans `%TEMP%\peace_preamp.log`. Ses profils sont dans la `Map` `profiles` en haut du script.
